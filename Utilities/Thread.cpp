@@ -109,13 +109,15 @@ extern thread_local std::string(*g_tls_log_prefix)();
 // Report error and call std::abort(), defined in main.cpp
 [[noreturn]] void report_fatal_error(std::string_view text, bool is_html = false, bool include_help_text = true);
 
+enum cpu_threads_emulation_info_dump_t : u32 {};
+
 std::string dump_useful_thread_info()
 {
 	std::string result;
 
 	if (auto cpu = get_current_cpu_thread())
 	{
-		cpu->dump_all(result);
+		fmt::append(result, "%s", cpu_threads_emulation_info_dump_t{cpu->id});
 	}
 
 	return result;
@@ -1358,7 +1360,7 @@ bool handle_access_violation(u32 addr, bool is_writing, ucontext_t* context) noe
 	// check if address is RawSPU MMIO register
 	do if (addr - RAW_SPU_BASE_ADDR < (6 * RAW_SPU_OFFSET) && (addr % RAW_SPU_OFFSET) >= RAW_SPU_PROB_OFFSET)
 	{
-		auto thread = idm::get<named_thread<spu_thread>>(spu_thread::find_raw_spu((addr - RAW_SPU_BASE_ADDR) / RAW_SPU_OFFSET));
+		auto thread = idm::get_unlocked<named_thread<spu_thread>>(spu_thread::find_raw_spu((addr - RAW_SPU_BASE_ADDR) / RAW_SPU_OFFSET));
 
 		if (!thread)
 		{
@@ -1546,7 +1548,7 @@ bool handle_access_violation(u32 addr, bool is_writing, ucontext_t* context) noe
 			}
 		}
 
-		if (auto pf_port = idm::get<lv2_obj, lv2_event_port>(pf_port_id); pf_port && pf_port->queue)
+		if (auto pf_port = idm::get_unlocked<lv2_obj, lv2_event_port>(pf_port_id); pf_port && pf_port->queue)
 		{
 			// We notify the game that a page fault occurred so it can rectify it.
 			// Note, for data3, were the memory readable AND we got a page fault, it must be due to a write violation since reads are allowed.
@@ -1701,23 +1703,58 @@ bool handle_access_violation(u32 addr, bool is_writing, ucontext_t* context) noe
 		cpu->state += cpu_flag::wait;
 	}
 
-	Emu.Pause(true);
-
-	if (!g_tls_access_violation_recovered)
-	{
-		vm_log.notice("\n%s", dump_useful_thread_info());
-	}
-
 	// Note: a thread may access violate more than once after hack_alloc recovery
 	// Do not log any further access violations in this case.
 	if (!g_tls_access_violation_recovered)
 	{
+		vm_log.notice("\n%s", dump_useful_thread_info());
 		vm_log.fatal("Access violation %s location 0x%x (%s)", is_writing ? "writing" : (cpu && cpu->get_class() == thread_class::ppu && cpu->get_pc() == addr ? "executing" : "reading"), addr, (is_writing && vm::check_addr(addr)) ? "read-only memory" : "unmapped memory");
 	}
 
+	while (Emu.IsPausedOrReady())
+	{
+		if (cpu)
+		{
+			auto state = +cpu->state;
+
+			if (::is_paused(state) && !::is_stopped(state))
+			{
+				thread_ctrl::wait_on(cpu->state, state);
+			}
+			else
+			{
+				// Temporary until Emulator updates state
+				std::this_thread::yield();
+			}
+		}
+		else
+		{
+			thread_ctrl::wait_for(1000);
+		}
+	}
+
+	Emu.Pause(true);
+
 	while (Emu.IsPaused())
 	{
-		thread_ctrl::wait();
+		if (cpu)
+		{
+			auto state = +cpu->state;
+
+			if (::is_paused(state) && !::is_stopped(state))
+			{
+				thread_ctrl::wait_on(cpu->state, state);
+			}
+			else
+			{
+				// Temporary until Emulator updates state
+				std::this_thread::yield();
+			}
+		}
+		else
+		{
+			thread_ctrl::wait_for(1000);
+		}
 	}
 
 	if (Emu.IsStopped() && !hack_alloc())
@@ -1816,6 +1853,11 @@ static LONG exception_filter(PEXCEPTION_POINTERS pExp) noexcept
 			pExp->ExceptionRecord->ExceptionInformation[0] == 1 ? "writing" : "reading";
 
 		fmt::append(msg, "Segfault %s location %p at %p.\n", cause, pExp->ExceptionRecord->ExceptionInformation[1], pExp->ExceptionRecord->ExceptionAddress);
+
+		if (vm::try_get_addr(reinterpret_cast<u8*>(pExp->ExceptionRecord->ExceptionInformation[1])).second)
+		{
+			fmt::append(msg, "Sudo Addr: %p, VM Addr: %p\n", vm::g_sudo_addr, vm::g_base_addr);
+		}
 	}
 	else
 	{
@@ -1996,6 +2038,11 @@ static void signal_handler(int /*sig*/, siginfo_t* info, void* uct) noexcept
 	}
 
 	std::string msg = fmt::format("Segfault %s location %p at %p.\n", cause, info->si_addr, RIP(context));
+
+	if (vm::try_get_addr(info->si_addr).second)
+	{
+		fmt::append(msg, "Sudo Addr: %p, VM Addr: %p\n", vm::g_sudo_addr, vm::g_base_addr);
+	}
 
 	append_thread_name(msg);
 
@@ -2553,13 +2600,13 @@ std::string thread_ctrl::get_name_cached()
 	return *name_cache;
 }
 
-thread_base::thread_base(native_entry entry, std::string name)
+thread_base::thread_base(native_entry entry, std::string name) noexcept
 	: entry_point(entry)
 	, m_tname(make_single_value(std::move(name)))
 {
 }
 
-thread_base::~thread_base()
+thread_base::~thread_base() noexcept
 {
 	// Cleanup abandoned tasks: initialize default results and signal
 	this->exec();
@@ -2600,7 +2647,7 @@ bool thread_base::join(bool dtor) const
 
 		if (i >= 16 && !(i & (i - 1)) && timeout != atomic_wait_timeout::inf)
 		{
-			sig_log.error(u8"Thread [%s] is too sleepy. Waiting for it %.3fµs already!", *m_tname.load(), (utils::get_tsc() - stamp0) / (utils::get_tsc_freq() / 1000000.));
+			sig_log.error("Thread [%s] is too sleepy. Waiting for it %.3fus already!", *m_tname.load(), (utils::get_tsc() - stamp0) / (utils::get_tsc_freq() / 1000000.));
 		}
 	}
 

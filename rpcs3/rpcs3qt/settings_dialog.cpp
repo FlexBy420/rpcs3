@@ -36,8 +36,6 @@
 #include "Loader/PSF.h"
 
 #include <set>
-#include <unordered_set>
-#include <thread>
 
 #include "util/sysinfo.hpp"
 #include "util/asm.hpp"
@@ -94,7 +92,7 @@ void remove_item(QComboBox* box, int data_value, int def_value)
 
 extern const std::map<std::string_view, int> g_prx_list;
 
-settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std::shared_ptr<emu_settings> emu_settings, const int& tab_index, QWidget* parent, const GameInfo* game, bool create_cfg_from_global_cfg)
+settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std::shared_ptr<emu_settings> emu_settings, int tab_index, QWidget* parent, const GameInfo* game, bool create_cfg_from_global_cfg)
 	: QDialog(parent)
 	, m_tab_index(tab_index)
 	, ui(new Ui::settings_dialog)
@@ -838,12 +836,6 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 				}
 			}
 
-			// Enable/disable MSAA depending on renderer
-			ui->antiAliasing->setEnabled(renderer.has_msaa);
-			ui->antiAliasing->blockSignals(true);
-			ui->antiAliasing->setCurrentText(renderer.has_msaa ? qstr(m_emu_settings->GetSetting(emu_settings_type::MSAA)) : tr("Disabled", "MSAA"));
-			ui->antiAliasing->blockSignals(false);
-
 			ui->graphicsAdapterBox->clear();
 
 			// Fill combobox with placeholder if no adapters needed
@@ -1070,7 +1062,7 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 		get_audio_output_devices(false);
 		change_audio_output_device(0); // Set device to 'Default'
 	});
-	
+
 	m_emu_settings->EnhanceComboBox(ui->combo_audio_channel_layout, emu_settings_type::AudioChannelLayout);
 	SubscribeTooltip(ui->gb_audio_channel_layout, tooltips.settings.audio_channel_layout);
 
@@ -1428,6 +1420,9 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	m_emu_settings->EnhanceCheckBox(ui->enableHostRoot, emu_settings_type::EnableHostRoot);
 	SubscribeTooltip(ui->enableHostRoot, tooltips.settings.enable_host_root);
 
+	m_emu_settings->EnhanceCheckBox(ui->emptyHdd0Tmp, emu_settings_type::EmptyHdd0Tmp);
+	SubscribeTooltip(ui->emptyHdd0Tmp, tooltips.settings.empty_hdd0_tmp);
+
 	m_emu_settings->EnhanceCheckBox(ui->enableCacheClearing, emu_settings_type::LimitCacheSize);
 	SubscribeTooltip(ui->gb_DiskCacheClearing, tooltips.settings.limit_cache_size);
 	if (game)
@@ -1509,7 +1504,7 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 
 		m_emu_settings->SetSetting(emu_settings_type::PSNCountry, country_code.toString().toStdString());
 	});
-	
+
 	SubscribeTooltip(ui->gb_psnCountryBox, tooltips.settings.psn_country);
 
 	if (!game)
@@ -1592,6 +1587,9 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 #else
 	ui->disableMslFastMath->setVisible(false);
 #endif
+
+	m_emu_settings->EnhanceCheckBox(ui->disableAsyncHostMM, emu_settings_type::DisableAsyncHostMM);
+	SubscribeTooltip(ui->disableAsyncHostMM, tooltips.settings.disable_async_host_mm);
 
 	// Comboboxes
 
@@ -1841,6 +1839,9 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 	m_emu_settings->EnhanceCheckBox(ui->showPPUCompilationHint, emu_settings_type::ShowPPUCompilationHint);
 	SubscribeTooltip(ui->showPPUCompilationHint, tooltips.settings.show_ppu_compilation_hint);
 
+	m_emu_settings->EnhanceCheckBox(ui->showAutosaveAutoloadHint, emu_settings_type::ShowAutosaveAutoloadHint);
+	SubscribeTooltip(ui->showAutosaveAutoloadHint, tooltips.settings.show_autosave_autoload_hint);
+
 	m_emu_settings->EnhanceCheckBox(ui->showPressureIntensityToggleHint, emu_settings_type::ShowPressureIntensityToggleHint);
 	SubscribeTooltip(ui->showPressureIntensityToggleHint, tooltips.settings.show_pressure_intensity_toggle_hint);
 
@@ -1849,9 +1850,6 @@ settings_dialog::settings_dialog(std::shared_ptr<gui_settings> gui_settings, std
 
 	m_emu_settings->EnhanceCheckBox(ui->showMouseAndKeyboardToggleHint, emu_settings_type::ShowMouseAndKeyboardToggleHint);
 	SubscribeTooltip(ui->showMouseAndKeyboardToggleHint, tooltips.settings.show_mouse_and_keyboard_toggle_hint);
-
-	m_emu_settings->EnhanceCheckBox(ui->showAutosaveAutoloadHint, emu_settings_type::ShowAutosaveAutoloadHint);
-	SubscribeTooltip(ui->showAutosaveAutoloadHint, tooltips.settings.show_autosave_autoload_hint);
 
 	m_emu_settings->EnhanceCheckBox(ui->pauseDuringHomeMenu, emu_settings_type::PauseDuringHomeMenu);
 	SubscribeTooltip(ui->pauseDuringHomeMenu, tooltips.settings.pause_during_home_menu);
@@ -2604,14 +2602,11 @@ void settings_dialog::ApplyStylesheet(bool reset)
 	}
 }
 
-int settings_dialog::exec()
+void settings_dialog::open()
 {
-	// singleShot Hack to fix following bug:
-	// If we use setCurrentIndex now we will miraculously see a resize of the dialog as soon as we
-	// switch to the cpu tab after conjuring the settings_dialog with another tab opened first.
-	// Weirdly enough this won't happen if we change the tab order so that anything else is at index 0.
-	ui->tab_widget_settings->setCurrentIndex(0);
-	QTimer::singleShot(0, [this]{ ui->tab_widget_settings->setCurrentIndex(m_tab_index); });
+	QDialog::open();
+
+	ui->tab_widget_settings->setCurrentIndex(m_tab_index);
 
 	// Open a dialog if your config file contained invalid entries
 	QTimer::singleShot(10, [this]
@@ -2637,8 +2632,6 @@ int settings_dialog::exec()
 			}
 		}
 	});
-
-	return QDialog::exec();
 }
 
 void settings_dialog::SubscribeDescription(QLabel* description)

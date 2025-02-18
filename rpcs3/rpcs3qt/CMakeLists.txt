@@ -80,6 +80,7 @@ add_library(rpcs3_ui STATIC
     save_data_info_dialog.cpp
     save_data_list_dialog.cpp
     save_manager_dialog.cpp
+    savestate_manager_dialog.cpp
     screenshot_item.cpp
     screenshot_manager_dialog.cpp
     screenshot_preview.cpp
@@ -160,4 +161,5 @@ target_link_libraries(rpcs3_ui
         3rdparty::wolfssl
         3rdparty::libcurl
         3rdparty::opencv
+        3rdparty::fusion
         3rdparty::rtmidi)

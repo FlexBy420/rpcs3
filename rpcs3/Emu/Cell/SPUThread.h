@@ -10,6 +10,8 @@
 #include "util/logs.hpp"
 #include "util/to_endian.hpp"
 
+#include "Utilities/mutex.h"
+
 #include "Loader/ELF.h"
 
 #include <span>
@@ -453,7 +455,7 @@ struct spu_int_ctrl_t
 	atomic_t<u64> mask;
 	atomic_t<u64> stat;
 
-	std::shared_ptr<struct lv2_int_tag> tag;
+	shared_ptr<struct lv2_int_tag> tag;
 
 	void set(u64 ints);
 
@@ -755,8 +757,8 @@ public:
 	atomic_t<status_npc_sync_var> status_npc{};
 	std::array<spu_int_ctrl_t, 3> int_ctrl{}; // SPU Class 0, 1, 2 Interrupt Management
 
-	std::array<std::pair<u32, std::shared_ptr<lv2_event_queue>>, 32> spuq{}; // Event Queue Keys for SPU Thread
-	std::shared_ptr<lv2_event_queue> spup[64]; // SPU Ports
+	std::array<std::pair<u32, shared_ptr<lv2_event_queue>>, 32> spuq{}; // Event Queue Keys for SPU Thread
+	shared_ptr<lv2_event_queue> spup[64]; // SPU Ports
 	spu_channel exit_status{}; // Threaded SPU exit status (not a channel, but the interface fits)
 	atomic_t<u32> last_exit_status; // Value to be written in exit_status after checking group termination
 	lv2_spu_group* const group; // SPU Thread Group (access by the spu threads in the group only! From other threads obtain a shared pointer to group using group ID)
@@ -888,6 +890,9 @@ public:
 	// Returns true if reservation existed but was just discovered to be lost
 	// It is safe to use on any address, even if not directly accessed by SPU (so it's slower)
 	bool reservation_check(u32 addr, const decltype(rdata)& data) const;
+	static bool reservation_check(u32 addr, u32 hash, atomic_t<u64, 64>* range_lock);
+	usz register_cache_line_waiter(u32 addr);
+	void deregister_cache_line_waiter(usz index);
 
 	bool read_reg(const u32 addr, u32& value);
 	bool write_reg(const u32 addr, const u32 value);
@@ -896,6 +901,8 @@ public:
 	static atomic_t<u32> g_raw_spu_ctr;
 	static atomic_t<u32> g_raw_spu_id[5];
 	static atomic_t<u32> g_spu_work_count;
+
+	static atomic_t<u64> g_spu_waiters_by_value[6];
 
 	static u32 find_raw_spu(u32 id)
 	{

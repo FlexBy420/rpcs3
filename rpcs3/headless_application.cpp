@@ -1,5 +1,6 @@
 #include "headless_application.h"
 
+#include "Emu/System.h"
 #include "Emu/RSX/Null/NullGSRender.h"
 #include "Emu/Cell/Modules/cellMsgDialog.h"
 #include "Emu/Cell/Modules/cellOskDialog.h"
@@ -120,6 +121,7 @@ void headless_application::InitializeCallbacks()
 		return nullptr;
 	};
 
+	callbacks.close_gs_frame = [](){};
 	callbacks.get_gs_frame = []() -> std::unique_ptr<GSFrameBase>
 	{
 		if (g_cfg.video.renderer != video_renderer::null)
@@ -155,7 +157,7 @@ void headless_application::InitializeCallbacks()
 	callbacks.enable_disc_eject  = [](bool) {};
 	callbacks.enable_disc_insert = [](bool) {};
 
-	callbacks.on_missing_fw = []() { return false; };
+	callbacks.on_missing_fw = []() {};
 
 	callbacks.handle_taskbar_progress = [](s32, s32) {};
 

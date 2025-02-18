@@ -1,7 +1,6 @@
 #include "stdafx.h"
 #include "Emu/System.h"
 #include "Emu/system_config.h"
-#include "Emu/IdManager.h"
 #include "Emu/Memory/vm_reservation.h"
 #include "Emu/Cell/PPUModule.h"
 #include "Emu/Cell/SPUThread.h"
@@ -1265,7 +1264,7 @@ s32 _spurs::initialize(ppu_thread& ppu, vm::ptr<CellSpurs> spurs, u32 revision, 
 		}
 
 		// entry point cannot be initialized immediately because SPU LS will be rewritten by sys_spu_thread_group_start()
-		//idm::get<named_thread<spu_thread>>(spurs->spus[num])->custom_task = [entry = spurs->spuImg.entry_point](spu_thread& spu)
+		//idm::get_unlocked<named_thread<spu_thread>>(spurs->spus[num])->custom_task = [entry = spurs->spuImg.entry_point](spu_thread& spu)
 		{
 			// Disabled
 			//spu.RegisterHleFunction(entry, spursKernelEntry);

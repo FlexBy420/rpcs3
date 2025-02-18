@@ -88,7 +88,7 @@ public:
 	~main_window();
 	bool Init(bool with_cli_boot);
 	QIcon GetAppIcon() const;
-	bool OnMissingFw();
+	void OnMissingFw();
 	bool InstallPackages(QStringList file_paths = {}, bool from_boot = false);
 	void InstallPup(QString file_path = "");
 
@@ -123,7 +123,7 @@ private Q_SLOTS:
 	void BootSavestate();
 	void BootRsxCapture(std::string path = "");
 	void DecryptSPRXLibraries();
-	static void show_boot_error(game_boot_result status);
+	void show_boot_error(game_boot_result status);
 
 	void SaveWindowState() const;
 	void SetIconSizeActions(int idx) const;
@@ -175,17 +175,22 @@ private:
 	drop_type IsValidFile(const QMimeData& md, QStringList* drop_paths = nullptr);
 	void AddGamesFromDirs(QStringList&& paths);
 
-	QAction* CreateRecentAction(const q_string_pair& entry, const uint& sc_idx);
-	void BootRecentAction(const QAction* act);
-	void AddRecentAction(const q_string_pair& entry);
+	QAction* CreateRecentAction(const q_string_pair& entry, u32 sc_idx, bool is_savestate);
+	void BootRecentAction(const QAction* act, bool is_savestate);
+	void AddRecentAction(const q_string_pair& entry, bool is_savestate);
 
 	void UpdateLanguageActions(const QStringList& language_codes, const QString& language);
 	void UpdateFilterActions();
 
 	static QString GetCurrentTitle();
 
-	q_pair_list m_rg_entries;
-	QList<QAction*> m_recent_game_acts;
+	struct recent_game_wrapper
+	{
+		q_pair_list entries;
+		QList<QAction*> actions;
+	};
+	recent_game_wrapper m_recent_game {};
+	recent_game_wrapper m_recent_save {};
 
 	std::shared_ptr<gui_game_info> m_selected_game;
 

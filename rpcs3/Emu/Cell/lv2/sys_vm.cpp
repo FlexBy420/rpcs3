@@ -6,7 +6,6 @@
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/PPUThread.h"
 #include "Emu/Cell/timers.hpp"
-#include "Emu/Memory/vm_locking.h"
 
 sys_vm_t::sys_vm_t(u32 _addr, u32 vsize, lv2_memory_container* ct, u32 psize)
 	: ct(ct)
@@ -64,7 +63,7 @@ error_code sys_vm_memory_map(ppu_thread& ppu, u64 vsize, u64 psize, u32 cid, u64
 		return CELL_EINVAL;
 	}
 
-	const auto idm_ct = idm::get<lv2_memory_container>(cid);
+	const auto idm_ct = idm::get_unlocked<lv2_memory_container>(cid);
 
 	const auto ct = cid == SYS_MEMORY_CONTAINER_ID_INVALID ? &g_fxo->get<lv2_memory_container>() : idm_ct.get();
 
@@ -260,7 +259,7 @@ error_code sys_vm_lock(ppu_thread& ppu, u32 addr, u32 size)
 		return CELL_EINVAL;
 	}
 
-	const auto block = idm::get<sys_vm_t>(sys_vm_t::find_id(addr));
+	const auto block = idm::get_unlocked<sys_vm_t>(sys_vm_t::find_id(addr));
 
 	if (!block || u64{addr} + size > u64{block->addr} + block->size)
 	{
@@ -281,7 +280,7 @@ error_code sys_vm_unlock(ppu_thread& ppu, u32 addr, u32 size)
 		return CELL_EINVAL;
 	}
 
-	const auto block = idm::get<sys_vm_t>(sys_vm_t::find_id(addr));
+	const auto block = idm::get_unlocked<sys_vm_t>(sys_vm_t::find_id(addr));
 
 	if (!block || u64{addr} + size > u64{block->addr} + block->size)
 	{
@@ -302,7 +301,7 @@ error_code sys_vm_touch(ppu_thread& ppu, u32 addr, u32 size)
 		return CELL_EINVAL;
 	}
 
-	const auto block = idm::get<sys_vm_t>(sys_vm_t::find_id(addr));
+	const auto block = idm::get_unlocked<sys_vm_t>(sys_vm_t::find_id(addr));
 
 	if (!block || u64{addr} + size > u64{block->addr} + block->size)
 	{
@@ -323,7 +322,7 @@ error_code sys_vm_flush(ppu_thread& ppu, u32 addr, u32 size)
 		return CELL_EINVAL;
 	}
 
-	const auto block = idm::get<sys_vm_t>(sys_vm_t::find_id(addr));
+	const auto block = idm::get_unlocked<sys_vm_t>(sys_vm_t::find_id(addr));
 
 	if (!block || u64{addr} + size > u64{block->addr} + block->size)
 	{
@@ -344,7 +343,7 @@ error_code sys_vm_invalidate(ppu_thread& ppu, u32 addr, u32 size)
 		return CELL_EINVAL;
 	}
 
-	const auto block = idm::get<sys_vm_t>(sys_vm_t::find_id(addr));
+	const auto block = idm::get_unlocked<sys_vm_t>(sys_vm_t::find_id(addr));
 
 	if (!block || u64{addr} + size > u64{block->addr} + block->size)
 	{
@@ -365,7 +364,7 @@ error_code sys_vm_store(ppu_thread& ppu, u32 addr, u32 size)
 		return CELL_EINVAL;
 	}
 
-	const auto block = idm::get<sys_vm_t>(sys_vm_t::find_id(addr));
+	const auto block = idm::get_unlocked<sys_vm_t>(sys_vm_t::find_id(addr));
 
 	if (!block || u64{addr} + size > u64{block->addr} + block->size)
 	{
@@ -386,7 +385,7 @@ error_code sys_vm_sync(ppu_thread& ppu, u32 addr, u32 size)
 		return CELL_EINVAL;
 	}
 
-	const auto block = idm::get<sys_vm_t>(sys_vm_t::find_id(addr));
+	const auto block = idm::get_unlocked<sys_vm_t>(sys_vm_t::find_id(addr));
 
 	if (!block || u64{addr} + size > u64{block->addr} + block->size)
 	{
@@ -402,7 +401,7 @@ error_code sys_vm_test(ppu_thread& ppu, u32 addr, u32 size, vm::ptr<u64> result)
 
 	sys_vm.warning("sys_vm_test(addr=0x%x, size=0x%x, result=*0x%x)", addr, size, result);
 
-	const auto block = idm::get<sys_vm_t>(sys_vm_t::find_id(addr));
+	const auto block = idm::get_unlocked<sys_vm_t>(sys_vm_t::find_id(addr));
 
 	if (!block || u64{addr} + size > u64{block->addr} + block->size)
 	{
@@ -421,7 +420,7 @@ error_code sys_vm_get_statistics(ppu_thread& ppu, u32 addr, vm::ptr<sys_vm_stati
 
 	sys_vm.warning("sys_vm_get_statistics(addr=0x%x, stat=*0x%x)", addr, stat);
 
-	const auto block = idm::get<sys_vm_t>(sys_vm_t::find_id(addr));
+	const auto block = idm::get_unlocked<sys_vm_t>(sys_vm_t::find_id(addr));
 
 	if (!block || block->addr != addr)
 	{

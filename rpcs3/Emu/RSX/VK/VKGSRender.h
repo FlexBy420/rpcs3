@@ -17,14 +17,9 @@
 #include "VKFramebuffer.h"
 #include "VKShaderInterpreter.h"
 #include "VKQueryPool.h"
-#include "util/asm.hpp"
 
-#include "Emu/RSX/GCM.h"
 #include "Emu/RSX/GSRender.h"
 #include "Emu/RSX/Host/RSXDMAWriter.h"
-
-#include <thread>
-#include <optional>
 
 using namespace vk::vmm_allocation_pool_; // clang workaround.
 using namespace vk::upscaling_flags_;     // ditto
@@ -149,6 +144,7 @@ private:
 	vk::data_heap m_index_buffer_ring_info;            // Index data
 	vk::data_heap m_texture_upload_buffer_ring_info;   // Texture upload heap
 	vk::data_heap m_raster_env_ring_info;              // Raster control such as polygon and line stipple
+	vk::data_heap m_instancing_buffer_ring_info;       // Instanced rendering data (constants indirection table + instanced constants)
 
 	vk::data_heap m_fragment_instructions_buffer;
 	vk::data_heap m_vertex_instructions_buffer;
@@ -160,6 +156,8 @@ private:
 	VkDescriptorBufferInfo m_fragment_constants_buffer_info {};
 	VkDescriptorBufferInfo m_fragment_texture_params_buffer_info {};
 	VkDescriptorBufferInfo m_raster_env_buffer_info {};
+	VkDescriptorBufferInfo m_instancing_indirection_buffer_info {};
+	VkDescriptorBufferInfo m_instancing_constants_array_buffer_info{};
 
 	VkDescriptorBufferInfo m_vertex_instructions_buffer_info {};
 	VkDescriptorBufferInfo m_fragment_instructions_buffer_info {};
@@ -284,6 +282,9 @@ public:
 
 	// GRAPH backend
 	void patch_transform_constants(rsx::context* ctx, u32 index, u32 count) override;
+
+	// Misc
+	bool is_current_program_interpreted() const override;
 
 protected:
 	void clear_surface(u32 mask) override;

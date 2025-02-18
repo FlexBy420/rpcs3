@@ -34,6 +34,8 @@ namespace vk
 			VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT fbo_loops_info{};
 			VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR shader_barycentric_info{};
 			VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_color_info{};
+			VkPhysicalDeviceBorderColorSwizzleFeaturesEXT border_color_swizzle_info{};
+			VkPhysicalDeviceFaultFeaturesEXT device_fault_info{};
 
 			if (device_extensions.is_supported(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME))
 			{
@@ -70,6 +72,20 @@ namespace vk
 				features2.pNext                = &custom_border_color_info;
 			}
 
+			if (device_extensions.is_supported(VK_EXT_BORDER_COLOR_SWIZZLE_EXTENSION_NAME))
+			{
+				border_color_swizzle_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT;
+				border_color_swizzle_info.pNext = features2.pNext;
+				features2.pNext                 = &border_color_swizzle_info;
+			}
+
+			if (device_extensions.is_supported(VK_EXT_DEVICE_FAULT_EXTENSION_NAME))
+			{
+				device_fault_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
+				device_fault_info.pNext = features2.pNext;
+				features2.pNext         = &device_fault_info;
+			}
+
 			auto _vkGetPhysicalDeviceFeatures2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(vkGetInstanceProcAddr(parent, "vkGetPhysicalDeviceFeatures2KHR"));
 			ensure(_vkGetPhysicalDeviceFeatures2KHR); // "vkGetInstanceProcAddress failed to find entry point!"
 			_vkGetPhysicalDeviceFeatures2KHR(dev, &features2);
@@ -78,9 +94,13 @@ namespace vk
 			shader_types_support.allow_float16 = !!shader_support_info.shaderFloat16;
 			shader_types_support.allow_int8    = !!shader_support_info.shaderInt8;
 
-			optional_features_support.custom_border_color = !!custom_border_color_info.customBorderColors && !!custom_border_color_info.customBorderColorWithoutFormat;
+			custom_border_color_support.supported = !!custom_border_color_info.customBorderColors && !!custom_border_color_info.customBorderColorWithoutFormat;
+			custom_border_color_support.swizzle_extension_supported = border_color_swizzle_info.sType == VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BORDER_COLOR_SWIZZLE_FEATURES_EXT;
+			custom_border_color_support.require_border_color_remap = !border_color_swizzle_info.borderColorSwizzleFromImage;
+
 			optional_features_support.barycentric_coords  = !!shader_barycentric_info.fragmentShaderBarycentric;
 			optional_features_support.framebuffer_loops   = !!fbo_loops_info.attachmentFeedbackLoopLayout;
+			optional_features_support.extended_device_fault = !!device_fault_info.deviceFault;
 
 			features = features2.features;
 
@@ -107,6 +127,13 @@ namespace vk
 
 		optional_features_support.debug_utils              = instance_extensions.is_supported(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
 		optional_features_support.surface_capabilities_2   = instance_extensions.is_supported(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+
+		// Post-initialization checks
+		if (!custom_border_color_support.swizzle_extension_supported)
+		{
+			// So far only AMD is known to remap image view and border color together. Mark as not required.
+			custom_border_color_support.require_border_color_remap = get_driver_vendor() != driver_vendor::AMD;
+		}
 	}
 
 	void physical_device::get_physical_device_properties(bool allow_extensions)
@@ -270,6 +297,16 @@ namespace vk
 				return driver_vendor::V3DV;
 			}
 
+			if (gpu_name.find("Apple") != umax)
+			{
+				return driver_vendor::HONEYKRISP;
+			}
+
+			if (gpu_name.find("Panfrost") != umax)
+			{
+				return driver_vendor::PANVK;
+			}
+
 			return driver_vendor::unknown;
 		}
 		else
@@ -295,6 +332,10 @@ namespace vk
 				return driver_vendor::NVK;
 			case VK_DRIVER_ID_MESA_V3DV:
 				return driver_vendor::V3DV;
+			case VK_DRIVER_ID_MESA_HONEYKRISP:
+				return driver_vendor::HONEYKRISP;
+			case VK_DRIVER_ID_MESA_PANVK:
+				return driver_vendor::PANVK;
 			default:
 				// Mobile?
 				return driver_vendor::unknown;
@@ -438,6 +479,11 @@ namespace vk
 			requested_extensions.push_back(VK_KHR_SHADER_FLOAT16_INT8_EXTENSION_NAME);
 		}
 
+		if (pgpu->custom_border_color_support)
+		{
+			requested_extensions.push_back(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
+		}
+
 		if (pgpu->optional_features_support.conditional_rendering)
 		{
 			requested_extensions.push_back(VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME);
@@ -480,14 +526,14 @@ namespace vk
 			requested_extensions.push_back(VK_KHR_FRAGMENT_SHADER_BARYCENTRIC_EXTENSION_NAME);
 		}
 
-		if (pgpu->optional_features_support.custom_border_color)
-		{
-			requested_extensions.push_back(VK_EXT_CUSTOM_BORDER_COLOR_EXTENSION_NAME);
-		}
-
 		if (pgpu->optional_features_support.synchronization_2)
 		{
 			requested_extensions.push_back(VK_KHR_SYNCHRONIZATION_2_EXTENSION_NAME);
+		}
+
+		if (pgpu->optional_features_support.extended_device_fault)
+		{
+			requested_extensions.push_back(VK_EXT_DEVICE_FAULT_EXTENSION_NAME);
 		}
 
 		enabled_features.robustBufferAccess = VK_TRUE;
@@ -620,6 +666,12 @@ namespace vk
 			enabled_features.textureCompressionBC = VK_FALSE;
 		}
 
+		if (!pgpu->features.textureCompressionBC && pgpu->get_driver_vendor() == driver_vendor::PANVK)
+		{
+			rsx_log.error("Your GPU running on the PANVK driver does not support full texture block compression. Graphics may not render correctly.");
+			enabled_features.textureCompressionBC = VK_FALSE;
+		}
+
 		VkDeviceCreateInfo device = {};
 		device.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
 		device.pNext = nullptr;
@@ -665,6 +717,16 @@ namespace vk
 			device.pNext = &indexing_features;
 		}
 
+		VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_color_features{};
+		if (pgpu->custom_border_color_support)
+		{
+			custom_border_color_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT;
+			custom_border_color_features.customBorderColors = VK_TRUE;
+			custom_border_color_features.customBorderColorWithoutFormat = VK_TRUE;
+			custom_border_color_features.pNext = const_cast<void*>(device.pNext);
+			device.pNext = &custom_border_color_features;
+		}
+
 		VkPhysicalDeviceAttachmentFeedbackLoopLayoutFeaturesEXT fbo_loop_features{};
 		if (pgpu->optional_features_support.framebuffer_loops)
 		{
@@ -674,16 +736,6 @@ namespace vk
 			device.pNext = &fbo_loop_features;
 		}
 
-		VkPhysicalDeviceCustomBorderColorFeaturesEXT custom_border_color_features{};
-		if (pgpu->optional_features_support.custom_border_color)
-		{
-			custom_border_color_features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CUSTOM_BORDER_COLOR_FEATURES_EXT;
-			custom_border_color_features.customBorderColors = VK_TRUE;
-			custom_border_color_features.customBorderColorWithoutFormat = VK_TRUE;
-			custom_border_color_features.pNext = const_cast<void*>(device.pNext);
-			device.pNext = &custom_border_color_features;
-		}
-
 		VkPhysicalDeviceSynchronization2FeaturesKHR synchronization2_info{};
 		if (pgpu->optional_features_support.synchronization_2)
 		{
@@ -691,6 +743,34 @@ namespace vk
 			synchronization2_info.pNext = const_cast<void*>(device.pNext);
 			synchronization2_info.synchronization2 = VK_TRUE;
 			device.pNext = &synchronization2_info;
+		}
+
+		VkPhysicalDeviceFaultFeaturesEXT device_fault_info{};
+		if (pgpu->optional_features_support.extended_device_fault)
+		{
+			device_fault_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT;
+			device_fault_info.pNext = const_cast<void*>(device.pNext);
+			device_fault_info.deviceFault = VK_TRUE;
+			device_fault_info.deviceFaultVendorBinary = VK_FALSE;
+			device.pNext = &device_fault_info;
+		}
+
+		VkPhysicalDeviceConditionalRenderingFeaturesEXT conditional_rendering_info{};
+		if (pgpu->optional_features_support.conditional_rendering)
+		{
+			conditional_rendering_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONDITIONAL_RENDERING_FEATURES_EXT;
+			conditional_rendering_info.pNext = const_cast<void*>(device.pNext);
+			conditional_rendering_info.conditionalRendering = VK_TRUE;
+			device.pNext = &conditional_rendering_info;
+		}
+
+		VkPhysicalDeviceFragmentShaderBarycentricFeaturesKHR shader_barycentric_info{};
+		if (pgpu->optional_features_support.barycentric_coords)
+		{
+			shader_barycentric_info.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_SHADER_BARYCENTRIC_FEATURES_KHR;
+			shader_barycentric_info.pNext = const_cast<void*>(device.pNext);
+			shader_barycentric_info.fragmentShaderBarycentric = VK_TRUE;
+			device.pNext = &shader_barycentric_info;
 		}
 
 		if (auto error = vkCreateDevice(*pgpu, &device, nullptr, &dev))
@@ -734,6 +814,11 @@ namespace vk
 			_vkCmdSetEvent2KHR = reinterpret_cast<PFN_vkCmdSetEvent2KHR>(vkGetDeviceProcAddr(dev, "vkCmdSetEvent2KHR"));
 			_vkCmdWaitEvents2KHR = reinterpret_cast<PFN_vkCmdWaitEvents2KHR>(vkGetDeviceProcAddr(dev, "vkCmdWaitEvents2KHR"));
 			_vkCmdPipelineBarrier2KHR = reinterpret_cast<PFN_vkCmdPipelineBarrier2KHR>(vkGetDeviceProcAddr(dev, "vkCmdPipelineBarrier2KHR"));
+		}
+
+		if (pgpu->optional_features_support.extended_device_fault)
+		{
+			_vkGetDeviceFaultInfoEXT = reinterpret_cast<PFN_vkGetDeviceFaultInfoEXT>(vkGetDeviceProcAddr(dev, "vkGetDeviceFaultInfoEXT"));
 		}
 
 		memory_map = vk::get_memory_mapping(pdev);

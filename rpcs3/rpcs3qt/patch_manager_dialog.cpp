@@ -14,7 +14,6 @@
 
 #include "ui_patch_manager_dialog.h"
 #include "patch_manager_dialog.h"
-#include "table_item_delegate.h"
 #include "gui_settings.h"
 #include "downloader.h"
 #include "qt_utils.h"
@@ -1247,7 +1246,16 @@ bool patch_manager_dialog::handle_json(const QByteArray& data)
 	if (patch_engine::load(patches, "From Download", content, true, &log_message))
 	{
 		patch_log.notice("Successfully validated downloaded patch file");
-		const std::string path = patch_engine::get_patches_path() + "patch.yml";
+
+		const std::string patches_path = patch_engine::get_patches_path();
+
+		if (!fs::create_path(patches_path))
+		{
+			patch_log.fatal("Failed to create path: %s (%s)", patches_path, fs::g_tls_error);
+			return false;
+		}
+
+		const std::string path = patches_path + "patch.yml";
 
 		// Back up current patch file if possible
 		if (fs::is_file(path))

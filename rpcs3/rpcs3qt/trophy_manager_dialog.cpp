@@ -420,7 +420,7 @@ bool trophy_manager_dialog::LoadTrophyFolderToDB(const std::string& trop_name)
 	std::unique_ptr<GameTrophiesData> game_trophy_data = std::make_unique<GameTrophiesData>();
 
 	game_trophy_data->path = vfs_path;
-	game_trophy_data->trop_usr.reset(new TROPUSRLoader());
+	game_trophy_data->trop_usr = std::make_unique<TROPUSRLoader>();
 	const std::string tropusr_path = trophy_path + "/TROPUSR.DAT";
 	const std::string tropconf_path = trophy_path + "/TROPCONF.SFM";
 	const bool success = game_trophy_data->trop_usr->Load(tropusr_path, tropconf_path).success;
@@ -601,7 +601,6 @@ void trophy_manager_dialog::ResizeGameIcons()
 					if (!item->data(GameUserRole::GamePixmapLoaded).toBool())
 					{
 						// Load game icon
-						const std::string icon_path = m_trophies_db[trophy_index]->path + "ICON0.PNG";
 						if (!icon.load(QString::fromStdString(icon_path)))
 						{
 							gui_log.warning("Could not load trophy game icon from path %s", icon_path);
@@ -1110,11 +1109,13 @@ void trophy_manager_dialog::PopulateTrophyTable()
 		return;
 
 	auto& data = m_trophies_db[m_game_combo->currentData().toInt()];
+	ensure(!!data);
+
 	gui_log.trace("Populating Trophy Manager UI with %s %s", data->game_name, data->path);
 
 	const int all_trophies = data->trop_usr->GetTrophiesCount();
 	const int unlocked_trophies = data->trop_usr->GetUnlockedTrophiesCount();
-	const int percentage = 100 * unlocked_trophies / all_trophies;
+	const int percentage = (all_trophies > 0) ? (100 * unlocked_trophies / all_trophies) : 0;
 
 	m_game_progress->setText(tr("Progress: %1% (%2/%3)").arg(percentage).arg(unlocked_trophies).arg(all_trophies));
 
@@ -1172,11 +1173,12 @@ void trophy_manager_dialog::PopulateTrophyTable()
 		// Get name and detail
 		for (std::shared_ptr<rXmlNode> n2 = n->GetChildren(); n2; n2 = n2->GetNext())
 		{
-			if (n2->GetName() == "name")
+			const std::string name = n2->GetName();
+			if (name == "name")
 			{
 				strcpy_trunc(details.name, n2->GetNodeContent());
 			}
-			if (n2->GetName() == "detail")
+			else if (name == "detail")
 			{
 				strcpy_trunc(details.description, n2->GetNodeContent());
 			}

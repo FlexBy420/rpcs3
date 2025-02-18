@@ -4,15 +4,15 @@
 #include "rpcs3_version.h"
 #include "downloader.h"
 #include "gui_settings.h"
-#include "Utilities/StrUtil.h"
 #include "Utilities/File.h"
 #include "Emu/System.h"
-#include "Emu/system_utils.hpp"
 #include "Crypto/utils.h"
 #include "util/logs.hpp"
 #include "util/types.hpp"
+#include "util/sysinfo.hpp"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QDateTime>
 #include <QMessageBox>
 #include <QLabel>
@@ -39,19 +39,10 @@
 #define PATH_MAX MAX_PATH
 #endif
 
+#include "Utilities/StrUtil.h"
 #else
 #include <unistd.h>
 #include <sys/stat.h>
-#endif
-
-#if defined(__APPLE__)
-// sysinfo_darwin.mm
-namespace Darwin_Version
-{
-	extern int getNSmajorVersion();
-	extern int getNSminorVersion();
-	extern int getNSpatchVersion();
-}
 #endif
 
 LOG_CHANNEL(update_log, "UPDATER");
@@ -115,26 +106,11 @@ void update_manager::check_for_updates(bool automatic, bool check_only, bool aut
 		Q_EMIT signal_update_available(result_json && !m_update_message.isEmpty());
 	});
 
-#if defined(__APPLE__)
-	const std::string url = fmt::format("https://update.rpcs3.net/"
-		"?api=v3"
-		"&c=%s"
-		"&os_type=macos"
-		"&os_arch="
-#if defined(ARCH_X64)
-		"x64"
-#elif defined(ARCH_ARM64)
-		"arm64"
-#endif
-		"&os_version=%i.%i.%i",
-		rpcs3::get_commit_and_hash().second,
-		Darwin_Version::getNSmajorVersion(),
-		Darwin_Version::getNSminorVersion(),
-		Darwin_Version::getNSpatchVersion());
-#else
-	const std::string url = "https://update.rpcs3.net/?api=v2&c=" + rpcs3::get_commit_and_hash().second;
-#endif
-	
+	const utils::OS_version os = utils::get_OS_version();
+
+	const std::string url = fmt::format("https://update.rpcs3.net/?api=v3&c=%s&os_type=%s&os_arch=%s&os_version=%i.%i.%i",
+		rpcs3::get_commit_and_hash().second, os.type, os.arch, os.version_major, os.version_minor, os.version_patch);
+
 	m_downloader->start(url, true, !automatic, tr("Checking For Updates"), true);
 }
 
@@ -198,11 +174,25 @@ bool update_manager::handle_json(bool automatic, bool check_only, bool auto_acce
 #endif
 
 	// Check that every bit of info we need is there
-	if (!latest[os].isObject() || !latest[os]["download"].isString() || !latest[os]["size"].isDouble() || !latest[os]["checksum"].isString() || !latest["version"].isString() ||
-	    !latest["datetime"].isString() ||
-	    (hash_found && (!current.isObject() || !current["version"].isString() || !current["datetime"].isString())))
+	const auto check_json = [](bool cond, std::string_view msg) -> bool
 	{
-		update_log.error("Some information seems unavailable");
+		if (cond) return true;
+		update_log.error("%s", msg);
+		return false;
+	};
+	if (!(check_json(latest[os].isObject(), fmt::format("Node 'latest_build: %s' not found", os)) &&
+	      check_json(latest[os]["download"].isString(), fmt::format("Node 'latest_build: %s: download' not found or not a string", os)) &&
+	      check_json(latest[os]["size"].isDouble(), fmt::format("Node 'latest_build: %s: size' not found or not a double", os)) &&
+	      check_json(latest[os]["checksum"].isString(), fmt::format("Node 'latest_build: %s: checksum' not found or not a string", os)) &&
+	      check_json(latest["version"].isString(), "Node 'latest_build: version' not found or not a string") &&
+	      check_json(latest["datetime"].isString(), "Node 'latest_build: datetime' not found or not a string")
+	     ) ||
+	     (hash_found && !(
+	      check_json(current.isObject(), "JSON doesn't contain current_build section") &&
+	      check_json(current["version"].isString(), "Node 'current_build: datetime' not found or not a string") &&
+	      check_json(current["datetime"].isString(), "Node 'current_build: version' not found or not a string")
+	     )))
+	{
 		return false;
 	}
 
@@ -232,29 +222,31 @@ bool update_manager::handle_json(bool automatic, bool check_only, bool auto_acce
 
 	const Localized localized;
 
-	m_new_version = latest["version"].toString().toStdString();
+	const QString new_version = latest["version"].toString();
+	m_new_version = new_version.toStdString();
 	const QString support_message = tr("<br>You can empower our project at <a href=\"https://rpcs3.net/patreon\">RPCS3 Patreon</a>.<br>");
 
 	if (hash_found)
 	{
-		m_old_version = current["version"].toString().toStdString();
+		const QString old_version = current["version"].toString();
+		m_old_version = old_version.toStdString();
 
 		if (diff_msec < 0)
 		{
 			// This usually means that the current version was marked as broken and won't be shipped anymore, so we need to downgrade to avoid certain bugs.
 			m_update_message = tr("A better version of RPCS3 is available!<br><br>Current version: %0 (%1)<br>Better version: %2 (%3)<br>%4<br>Do you want to update?")
-				.arg(current["version"].toString())
+				.arg(old_version)
 				.arg(cur_str)
-				.arg(latest["version"].toString())
+				.arg(new_version)
 				.arg(lts_str)
 				.arg(support_message);
 		}
 		else
 		{
 			m_update_message = tr("A new version of RPCS3 is available!<br><br>Current version: %0 (%1)<br>Latest version: %2 (%3)<br>Your version is %4 behind.<br>%5<br>Do you want to update?")
-				.arg(current["version"].toString())
+				.arg(old_version)
 				.arg(cur_str)
-				.arg(latest["version"].toString())
+				.arg(new_version)
 				.arg(lts_str)
 				.arg(localized.GetVerboseTimeByMs(diff_msec, true))
 				.arg(support_message);
@@ -265,7 +257,7 @@ bool update_manager::handle_json(bool automatic, bool check_only, bool auto_acce
 		m_old_version = fmt::format("%s-%s-%s", rpcs3::get_full_branch(), rpcs3::get_branch(), rpcs3::get_version().to_string());
 
 		m_update_message = tr("You're currently using a custom or PR build.<br><br>Latest version: %0 (%1)<br>The latest version is %2 old.<br>%3<br>Do you want to update to the latest official RPCS3 version?")
-			.arg(latest["version"].toString())
+			.arg(new_version)
 			.arg(lts_str)
 			.arg(localized.GetVerboseTimeByMs(std::abs(diff_msec), true))
 			.arg(support_message);
@@ -285,6 +277,13 @@ bool update_manager::handle_json(bool automatic, bool check_only, bool auto_acce
 
 	if (!auto_accept)
 	{
+		if (automatic && m_gui_settings->GetValue(gui::ib_skip_version).toString() == new_version)
+		{
+			update_log.notice("Skipping automatic update notification for version '%s' due to user preference", new_version);
+			m_downloader->close_progress_dialog();
+			return true;
+		}
+
 		const auto& changelog = json_data["changelog"];
 
 		if (changelog.isArray())
@@ -372,6 +371,7 @@ void update_manager::update(bool auto_accept)
 
 		QMessageBox mb(QMessageBox::Icon::Question, tr("Update Available"), m_update_message, QMessageBox::Yes | QMessageBox::No, m_downloader->get_progress_dialog() ? m_downloader->get_progress_dialog() : m_parent);
 		mb.setTextFormat(Qt::RichText);
+		mb.setCheckBox(new QCheckBox(tr("Don't show again for this version")));
 
 		if (!changelog_content.isEmpty())
 		{
@@ -397,6 +397,13 @@ void update_manager::update(bool auto_accept)
 		if (mb.exec() == QMessageBox::No)
 		{
 			update_log.notice("Aborting update: User declined update");
+
+			if (mb.checkBox()->isChecked())
+			{
+				update_log.notice("User requested to skip further automatic update notifications for version '%s'", m_new_version);
+				m_gui_settings->SetValue(gui::ib_skip_version, QString::fromStdString(m_new_version));
+			}
+
 			m_downloader->close_progress_dialog();
 			return;
 		}

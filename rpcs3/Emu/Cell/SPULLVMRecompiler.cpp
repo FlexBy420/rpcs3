@@ -43,11 +43,6 @@ const extern spu_decoder<spu_iflag> g_spu_iflag;
 #include <llvm/IR/Verifier.h>
 #include <llvm/TargetParser/Host.h>
 #include <llvm/Transforms/Utils/BasicBlockUtils.h>
-#if LLVM_VERSION_MAJOR < 17
-#include <llvm/IR/LegacyPassManager.h>
-#include <llvm/Transforms/Scalar.h>
-#include <llvm/Analysis/AliasAnalysis.h>
-#else
 #include <llvm/Analysis/CGSCCPassManager.h>
 #include <llvm/Analysis/LoopAnalysisManager.h>
 #include <llvm/IR/PassManager.h>
@@ -58,7 +53,6 @@ const extern spu_decoder<spu_iflag> g_spu_iflag;
 #include <llvm/Transforms/Scalar/LICM.h>
 #include <llvm/Transforms/Scalar/LoopPassManager.h>
 #include <llvm/Transforms/Scalar/SimplifyCFG.h>
-#endif
 #ifdef _MSC_VER
 #pragma warning(pop)
 #else
@@ -1658,7 +1652,7 @@ public:
 			u32 elements;
 			u32 dwords;
 
-			if (m_use_avx512 && g_cfg.core.full_width_avx512)
+			if (m_use_avx512)
 			{
 				stride = 64;
 				elements = 16;
@@ -1681,96 +1675,202 @@ public:
 			llvm::Value* starta_pc = m_ir->CreateAnd(get_pc(starta), 0x3fffc);
 			llvm::Value* data_addr = m_ir->CreateGEP(get_type<u8>(), m_lsptr, starta_pc);
 
-			llvm::Value* acc = nullptr;
+			llvm::Value* acc0 = nullptr;
+			llvm::Value* acc1 = nullptr;
+			bool toggle = true;
 
-			for (u32 j = starta; j < end; j += stride)
+			// Use a 512bit simple checksum to verify integrity if size is atleast 512b * 3
+			// This code uses a 512bit vector for all hardware to ensure behavior matches.
+			// The checksum path is still faster even on narrow hardware.
+			if ((end - starta) >= 192 && !g_cfg.core.precise_spu_verification)
 			{
-				int indices[16];
-				bool holes = false;
-				bool data = false;
-
-				for (u32 i = 0; i < elements; i++)
+				for (u32 j = starta; j < end; j += 64)
 				{
-					const u32 k = j + i * 4;
+					int indices[16];
+					bool holes = false;
+					bool data = false;
 
-					if (k < start || k >= end || !func.data[(k - start) / 4])
+					for (u32 i = 0; i < 16; i++)
 					{
-						indices[i] = elements;
-						holes      = true;
+						const u32 k = j + i * 4;
+
+						if (k < start || k >= end || !func.data[(k - start) / 4])
+						{
+							indices[i] = 16;
+							holes      = true;
+						}
+						else
+						{
+							indices[i] = i;
+							data       = true;
+						}
+					}
+
+					if (!data)
+					{
+						// Skip full-sized holes
+						continue;
+					}
+
+					llvm::Value* vls = nullptr;
+
+					// Load unaligned code block from LS
+					vls = m_ir->CreateAlignedLoad(get_type<u32[16]>(), _ptr<u32[16]>(data_addr, j - starta), llvm::MaybeAlign{4});
+
+					// Mask if necessary
+					if (holes)
+					{
+						vls = m_ir->CreateShuffleVector(vls, ConstantAggregateZero::get(vls->getType()), llvm::ArrayRef(indices, 16));
+					}
+
+					// Interleave accumulators for more performance
+					if (toggle)
+					{
+						acc0 = acc0 ? m_ir->CreateAdd(acc0, vls) : vls;
 					}
 					else
 					{
-						indices[i] = i;
-						data       = true;
+						acc1 = acc1 ? m_ir->CreateAdd(acc1, vls) : vls;
+					}
+					toggle = !toggle;
+					check_iterations++;
+				}
+
+				llvm::Value* acc = (acc0 && acc1) ? m_ir->CreateAdd(acc0, acc1): (acc0 ? acc0 : acc1);
+
+				// Create the checksum
+				u32 checksum[16] = {0};
+
+				for (u32 j = 0; j < func.data.size(); j += 16) // Process 16 elements per iteration
+				{
+					for (u32 i = 0; i < 16; i++)
+					{
+						if (j + i < func.data.size())
+						{
+							checksum[i] += func.data[j + i];
+						}
 					}
 				}
 
-				if (!data)
-				{
-					// Skip full-sized holes
-					continue;
-				}
+				auto* const_vector = ConstantDataVector::get(m_context, llvm::ArrayRef(checksum, 16));
+				acc = m_ir->CreateXor(acc, const_vector);
 
-				llvm::Value* vls = nullptr;
-
-				// Load unaligned code block from LS
-				if (m_use_avx512 && g_cfg.core.full_width_avx512)
-				{
-					vls = m_ir->CreateAlignedLoad(get_type<u32[16]>(), _ptr<u32[16]>(data_addr, j - starta), llvm::MaybeAlign{4});
-				}
-				else if (m_use_avx)
-				{
-					vls = m_ir->CreateAlignedLoad(get_type<u32[8]>(), _ptr<u32[8]>(data_addr, j - starta), llvm::MaybeAlign{4});
-				}
-				else
-				{
-					vls = m_ir->CreateAlignedLoad(get_type<u32[4]>(), _ptr<u32[4]>(data_addr, j - starta), llvm::MaybeAlign{4});
-				}
-
-				// Mask if necessary
-				if (holes)
-				{
-					vls = m_ir->CreateShuffleVector(vls, ConstantAggregateZero::get(vls->getType()), llvm::ArrayRef(indices, elements));
-				}
-
-				// Perform bitwise comparison and accumulate
-				u32 words[16];
-
-				for (u32 i = 0; i < elements; i++)
-				{
-					const u32 k = j + i * 4;
-					words[i] = k >= start && k < end ? func.data[(k - start) / 4] : 0;
-				}
-
-				vls = m_ir->CreateXor(vls, ConstantDataVector::get(m_context, llvm::ArrayRef(words, elements)));
-				acc = acc ? m_ir->CreateOr(acc, vls) : vls;
-				check_iterations++;
-			}
-
-			// Pattern for PTEST
-			if (m_use_avx512 && g_cfg.core.full_width_avx512)
-			{
+				// Pattern for PTEST
 				acc = m_ir->CreateBitCast(acc, get_type<u64[8]>());
-			}
-			else if (m_use_avx)
-			{
-				acc = m_ir->CreateBitCast(acc, get_type<u64[4]>());
+
+				llvm::Value* elem = m_ir->CreateExtractElement(acc, u64{0});
+
+				for (u32 i = 1; i < 8; i++)
+				{
+					elem = m_ir->CreateOr(elem, m_ir->CreateExtractElement(acc, i));
+				}
+
+				// Compare result with zero
+				const auto cond = m_ir->CreateICmpNE(elem, m_ir->getInt64(0));
+				m_ir->CreateCondBr(cond, label_diff, label_body, m_md_unlikely);
 			}
 			else
 			{
-				acc = m_ir->CreateBitCast(acc, get_type<u64[2]>());
+				for (u32 j = starta; j < end; j += stride)
+				{
+					int indices[16];
+					bool holes = false;
+					bool data = false;
+
+					for (u32 i = 0; i < elements; i++)
+					{
+						const u32 k = j + i * 4;
+
+						if (k < start || k >= end || !func.data[(k - start) / 4])
+						{
+							indices[i] = elements;
+							holes      = true;
+						}
+						else
+						{
+							indices[i] = i;
+							data       = true;
+						}
+					}
+
+					if (!data)
+					{
+						// Skip full-sized holes
+						continue;
+					}
+
+					llvm::Value* vls = nullptr;
+
+					// Load unaligned code block from LS
+					if (m_use_avx512)
+					{
+						vls = m_ir->CreateAlignedLoad(get_type<u32[16]>(), _ptr<u32[16]>(data_addr, j - starta), llvm::MaybeAlign{4});
+					}
+					else if (m_use_avx)
+					{
+						vls = m_ir->CreateAlignedLoad(get_type<u32[8]>(), _ptr<u32[8]>(data_addr, j - starta), llvm::MaybeAlign{4});
+					}
+					else
+					{
+						vls = m_ir->CreateAlignedLoad(get_type<u32[4]>(), _ptr<u32[4]>(data_addr, j - starta), llvm::MaybeAlign{4});
+					}
+
+					// Mask if necessary
+					if (holes)
+					{
+						vls = m_ir->CreateShuffleVector(vls, ConstantAggregateZero::get(vls->getType()), llvm::ArrayRef(indices, elements));
+					}
+
+					// Perform bitwise comparison and accumulate
+					u32 words[16];
+
+					for (u32 i = 0; i < elements; i++)
+					{
+						const u32 k = j + i * 4;
+						words[i] = k >= start && k < end ? func.data[(k - start) / 4] : 0;
+					}
+
+					vls = m_ir->CreateXor(vls, ConstantDataVector::get(m_context, llvm::ArrayRef(words, elements)));
+					
+					// Interleave accumulators for more performance
+					if (toggle)
+					{
+						acc0 = acc0 ? m_ir->CreateAdd(acc0, vls) : vls;
+					}
+					else
+					{
+						acc1 = acc1 ? m_ir->CreateAdd(acc1, vls) : vls;
+					}
+					toggle = !toggle;
+					check_iterations++;
+				}
+				llvm::Value* acc = (acc0 && acc1) ? m_ir->CreateAdd(acc0, acc1): (acc0 ? acc0 : acc1);
+
+				// Pattern for PTEST
+				if (m_use_avx512)
+				{
+					acc = m_ir->CreateBitCast(acc, get_type<u64[8]>());
+				}
+				else if (m_use_avx)
+				{
+					acc = m_ir->CreateBitCast(acc, get_type<u64[4]>());
+				}
+				else
+				{
+					acc = m_ir->CreateBitCast(acc, get_type<u64[2]>());
+				}
+
+				llvm::Value* elem = m_ir->CreateExtractElement(acc, u64{0});
+
+				for (u32 i = 1; i < dwords; i++)
+				{
+					elem = m_ir->CreateOr(elem, m_ir->CreateExtractElement(acc, i));
+				}
+
+				// Compare result with zero
+				const auto cond = m_ir->CreateICmpNE(elem, m_ir->getInt64(0));
+				m_ir->CreateCondBr(cond, label_diff, label_body, m_md_unlikely);
 			}
-
-			llvm::Value* elem = m_ir->CreateExtractElement(acc, u64{0});
-
-			for (u32 i = 1; i < dwords; i++)
-			{
-				elem = m_ir->CreateOr(elem, m_ir->CreateExtractElement(acc, i));
-			}
-
-			// Compare result with zero
-			const auto cond = m_ir->CreateICmpNE(elem, m_ir->getInt64(0));
-			m_ir->CreateCondBr(cond, label_diff, label_body, m_md_unlikely);
 		}
 
 		// Increase block counter with statistics
@@ -2567,21 +2667,6 @@ public:
 			m_function_table->eraseFromParent();
 		}
 
-#if LLVM_VERSION_MAJOR < 17
-		// Initialize pass manager
-		legacy::FunctionPassManager pm(_module.get());
-
-		// Basic optimizations
-		pm.add(createEarlyCSEPass());
-		pm.add(createCFGSimplificationPass());
-		//pm.add(createNewGVNPass());
-		pm.add(createDeadStoreEliminationPass());
-		pm.add(createLICMPass());
-		pm.add(createAggressiveDCEPass());
-		pm.add(createDeadCodeEliminationPass());
-		//pm.add(createLintPass()); // Check
-#else
-
 		// Create the analysis managers.
 		// These must be declared in this order so that they are destroyed in the
 		// correct order due to inter-analysis-manager references.
@@ -2610,7 +2695,6 @@ public:
 		fpm.addPass(DSEPass());
 		fpm.addPass(createFunctionToLoopPassAdaptor(LICMPass(LICMOptions()), true));
 		fpm.addPass(ADCEPass());
-#endif
 
 		for (auto& f : *m_module)
 		{
@@ -2620,11 +2704,7 @@ public:
 		for (const auto& func : m_functions)
 		{
 			const auto f = func.second.fn ? func.second.fn : func.second.chunk;
-#if LLVM_VERSION_MAJOR < 17
-			pm.run(*f);
-#else
 			fpm.run(*f, fam);
-#endif
 		}
 
 		// Clear context (TODO)
@@ -4666,35 +4746,44 @@ public:
 		return zshuffle(std::forward<TA>(a), 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
 	}
 
+	template <typename T, typename U>
+	static llvm_calli<u8[16], T, U> rotqbybi(T&& a, U&& b)
+	{
+		return {"spu_rotqbybi", {std::forward<T>(a), std::forward<U>(b)}};
+	}
+
 	void ROTQBYBI(spu_opcode_t op)
 	{
-		const auto a = get_vr<u8[16]>(op.ra);
-
-		// Data with swapped endian from a load instruction
-		if (auto [ok, as] = match_expr(a, byteswap(match<u8[16]>())); ok)
+		register_intrinsic("spu_rotqbybi", [&](llvm::CallInst* ci)
 		{
-			const auto sc = build<u8[16]>(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
-			const auto sh = sc + (splat_scalar(get_vr<u8[16]>(op.rb)) >> 3);
+			const auto a = value<u8[16]>(ci->getOperand(0));
+			const auto b = value<u8[16]>(ci->getOperand(1));
+
+			// Data with swapped endian from a load instruction
+			if (auto [ok, as] = match_expr(a, byteswap(match<u8[16]>())); ok)
+			{
+				const auto sc = build<u8[16]>(15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0);
+				const auto sh = sc + (splat_scalar(b) >> 3);
+
+				if (m_use_avx512_icl)
+				{
+					return eval(vpermb(as, sh));
+				}
+
+				return eval(pshufb(as, (sh & 0xf)));
+			}
+			const auto sc = build<u8[16]>(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
+			const auto sh = sc - (splat_scalar(b) >> 3);
 
 			if (m_use_avx512_icl)
 			{
-				set_vr(op.rt, vpermb(as, sh));
-				return;
+				return eval(vpermb(a, sh));
 			}
 
-			set_vr(op.rt, pshufb(as, (sh & 0xf)));
-			return;
-		}
-		const auto sc = build<u8[16]>(0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15);
-		const auto sh = sc - (splat_scalar(get_vr<u8[16]>(op.rb)) >> 3);
+			return eval(pshufb(a, (sh & 0xf)));
+		});
 
-		if (m_use_avx512_icl)
-		{
-			set_vr(op.rt, vpermb(a, sh));
-			return;
-		}
-
-		set_vr(op.rt, pshufb(a, (sh & 0xf)));
+		set_vr(op.rt, rotqbybi(get_vr<u8[16]>(op.ra), get_vr<u8[16]>(op.rb)));
 	}
 
 	void ROTQMBYBI(spu_opcode_t op)
@@ -4813,6 +4902,39 @@ public:
 	void ROTQBI(spu_opcode_t op)
 	{
 		const auto a = get_vr(op.ra);
+		const auto ax = get_vr<u8[16]>(op.ra);
+		const auto bx = get_vr<u8[16]>(op.rb);
+
+		// Combined bit and bytes shift
+		if (auto [ok, v0, v1] = match_expr(ax, rotqbybi(match<u8[16]>(), match<u8[16]>())); ok && v1.eq(bx))
+		{
+			const auto b32 = get_vr<s32[4]>(op.rb);
+
+			// Is the rotate less than 31 bits?
+			if (auto k = get_known_bits(b32); (k.Zero & 0x60) == 0x60u)
+			{
+				const auto b = splat_scalar(get_vr(op.rb));
+				set_vr(op.rt, fshl(bitcast<u32[4]>(v0), zshuffle(bitcast<u32[4]>(v0), 3, 0, 1, 2), b));
+				return;
+			}
+
+			// Inverted shift count
+			if (auto [ok1, v10, v11] = match_expr(b32, match<s32[4]>() - match<s32[4]>()); ok1)
+			{
+				if (auto [ok2, data] = get_const_vector(v10.value, m_pos); ok2)
+				{
+					if ((data & v128::from32p(0x7f)) == v128{})
+					{
+						if (auto k = get_known_bits(v11); (k.Zero & 0x60) == 0x60u)
+						{
+							set_vr(op.rt, fshr(zshuffle(bitcast<u32[4]>(v0), 1, 2, 3, 0), bitcast<u32[4]>(v0), splat_scalar(bitcast<u32[4]>(v11))));
+							return;
+						}
+					}
+				}
+			}
+		}
+
 		const auto b = splat_scalar(get_vr(op.rb) & 0x7);
 		set_vr(op.rt, fshl(a, zshuffle(a, 3, 0, 1, 2), b));
 	}
@@ -6048,6 +6170,8 @@ public:
 
 				final_result = eval(insert(final_result, i, r_fraction));
 			}
+
+			//final_result = eval(select(final_result != (0), final_result, bitcast<u32[4]>(pshufb(splat<u8[16]>(0), bitcast<u8[16]>(final_result)))));
 
 			return bitcast<f32[4]>(bitcast<u32[4]>(final_result | bitcast<u32[4]>(fix_exponent) | a_sign));
 		});

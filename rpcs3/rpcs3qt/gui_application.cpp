@@ -18,6 +18,7 @@
 #include "_discord_utils.h"
 #endif
 
+#include "Emu/Audio/audio_utils.h"
 #include "Emu/Io/Null/null_camera_handler.h"
 #include "Emu/Io/Null/null_music_handler.h"
 #include "Emu/vfs_config.h"
@@ -53,7 +54,10 @@
 #endif
 
 #ifdef _WIN32
-#include "Windows.h"
+#include <Usbiodef.h>
+#include <Dbt.h>
+
+#include "Emu/Cell/lv2/sys_usbd.h"
 #endif
 
 LOG_CHANNEL(gui_log, "GUI");
@@ -71,6 +75,9 @@ gui_application::~gui_application()
 {
 #ifdef WITH_DISCORD_RPC
 	discord::shutdown();
+#endif
+#ifdef _WIN32
+	unregister_device_notification();
 #endif
 }
 
@@ -161,18 +168,10 @@ bool gui_application::Init()
 	{
 		welcome_dialog* welcome = new welcome_dialog(m_gui_settings, false);
 
-		bool use_dark_theme = false;
-
-		connect(welcome, &QDialog::accepted, this, [&]()
+		if (welcome->exec() == QDialog::Rejected)
 		{
-			use_dark_theme = welcome->does_user_want_dark_theme();
-		});
-
-		welcome->exec();
-
-		if (use_dark_theme)
-		{
-			m_gui_settings->SetValue(gui::m_currentStylesheet, "Darker Style by TheMitoSan");
+			// If the agreement on RPCS3's usage conditions was not accepted by the user, ask the main window to gracefully terminate
+			return false;
 		}
 	}
 
@@ -203,6 +202,11 @@ bool gui_application::Init()
 	// Install native event filter
 #ifdef _WIN32 // Currently only needed for raw mouse input on windows
 	installNativeEventFilter(&m_native_event_filter);
+
+	if (m_main_window)
+	{
+		register_device_notification(m_main_window->winId());
+	}
 #endif
 
 	return true;
@@ -355,6 +359,34 @@ void gui_application::InitializeConnects()
 
 std::unique_ptr<gs_frame> gui_application::get_gs_frame()
 {
+	// Load AppIcon
+	const QIcon app_icon = m_main_window ? m_main_window->GetAppIcon() : gui::utils::get_app_icon_from_path(Emu.GetBoot(), Emu.GetTitleID());
+
+	if (m_game_window)
+	{
+		// Check if the continuous mode is enabled. We reset the mode after each use in order to ensure that it is only used when explicitly needed.
+		const bool continuous_mode_enabled = Emu.ContinuousModeEnabled(true);
+
+		// Make sure we run the same config
+		const bool is_same_renderer = m_game_window->renderer() == g_cfg.video.renderer;
+
+		if (is_same_renderer && (Emu.IsChildProcess() || continuous_mode_enabled))
+		{
+			gui_log.notice("gui_application: Re-using old game window (IsChildProcess=%d, ContinuousModeEnabled=%d)", Emu.IsChildProcess(), continuous_mode_enabled);
+
+			if (!app_icon.isNull())
+			{
+				m_game_window->setIcon(app_icon);
+			}
+			return std::unique_ptr<gs_frame>(m_game_window);
+		}
+
+		// Clean-up old game window. This should only happen if the renderer changed or there was an unexpected error during boot.
+		Emu.GetCallbacks().close_gs_frame();
+	}
+
+	gui_log.notice("gui_application: Creating new game window");
+
 	extern const std::unordered_map<video_resolution, std::pair<int, int>, value_hash<video_resolution>> g_video_out_resolution_map;
 
 	auto [w, h] = ::at32(g_video_out_resolution_map, g_cfg.video.resolution);
@@ -431,9 +463,6 @@ std::unique_ptr<gs_frame> gui_application::get_gs_frame()
 		frame_geometry.setSize(QSize(w, h));
 	}
 
-	// Load AppIcon
-	const QIcon app_icon = m_main_window ? m_main_window->GetAppIcon() : gui::utils::get_app_icon_from_path(Emu.GetBoot(), Emu.GetTitleID());
-
 	gs_frame* frame = nullptr;
 
 	switch (g_cfg.video.renderer.get())
@@ -452,6 +481,27 @@ std::unique_ptr<gs_frame> gui_application::get_gs_frame()
 	}
 
 	m_game_window = frame;
+	ensure(m_game_window);
+
+#ifdef _WIN32
+	if (!m_show_gui)
+	{
+		register_device_notification(m_game_window->winId());
+	}
+#endif
+
+	connect(m_game_window, &gs_frame::destroyed, this, [this]()
+	{
+		gui_log.notice("gui_application: Deleting old game window");
+		m_game_window = nullptr;
+
+#ifdef _WIN32
+		if (!m_show_gui)
+		{
+			unregister_device_notification();
+		}
+#endif
+	});
 
 	return std::unique_ptr<gs_frame>(frame);
 }
@@ -546,6 +596,16 @@ void gui_application::InitializeCallbacks()
 		return nullptr;
 	};
 
+	callbacks.close_gs_frame  = [this]()
+	{
+		if (m_game_window)
+		{
+			gui_log.warning("gui_application: Closing old game window");
+			m_game_window->ignore_stop_events();
+			delete m_game_window;
+			m_game_window = nullptr;
+		}
+	};
 	callbacks.get_gs_frame    = [this]() -> std::unique_ptr<GSFrameBase> { return get_gs_frame(); };
 	callbacks.get_msg_dialog  = [this]() -> std::shared_ptr<MsgDialogBase> { return m_show_gui ? std::make_shared<msg_dialog_frame>() : nullptr; };
 	callbacks.get_osk_dialog  = [this]() -> std::shared_ptr<OskDialogBase> { return m_show_gui ? std::make_shared<osk_dialog_frame>() : nullptr; };
@@ -577,8 +637,10 @@ void gui_application::InitializeCallbacks()
 
 	callbacks.on_missing_fw = [this]()
 	{
-		if (!m_main_window) return false;
-		return m_main_window->OnMissingFw();
+		if (m_main_window)
+		{
+			m_main_window->OnMissingFw();
+		}
 	};
 
 	callbacks.handle_taskbar_progress = [this](s32 type, s32 value)
@@ -587,10 +649,10 @@ void gui_application::InitializeCallbacks()
 		{
 			switch (type)
 			{
-			case 0: static_cast<gs_frame*>(m_game_window)->progress_reset(value); break;
-			case 1: static_cast<gs_frame*>(m_game_window)->progress_increment(value); break;
-			case 2: static_cast<gs_frame*>(m_game_window)->progress_set_limit(value); break;
-			case 3: static_cast<gs_frame*>(m_game_window)->progress_set_value(value); break;
+			case 0: m_game_window->progress_reset(value); break;
+			case 1: m_game_window->progress_increment(value); break;
+			case 2: m_game_window->progress_set_limit(value); break;
+			case 3: m_game_window->progress_set_value(value); break;
 			default: gui_log.fatal("Unknown type in handle_taskbar_progress(type=%d, value=%d)", type, value); break;
 			}
 		}
@@ -627,7 +689,7 @@ void gui_application::InitializeCallbacks()
 				// Create a new sound effect. Re-using the same object seems to be broken for some users starting with Qt 6.6.3.
 				std::unique_ptr<QSoundEffect> sound_effect = std::make_unique<QSoundEffect>();
 				sound_effect->setSource(QUrl::fromLocalFile(QString::fromStdString(path)));
-				sound_effect->setVolume(g_cfg.audio.volume * 0.01f);
+				sound_effect->setVolume(audio::get_volume());
 				sound_effect->play();
 
 				m_sound_effects.push_back(std::move(sound_effect));
@@ -775,7 +837,7 @@ void gui_application::InitializeCallbacks()
 							verbose_message += ". ";
 						}
 
-						verbose_message += "If Stuck, Report To Developers";
+						verbose_message += tr("If Stuck, Report To Developers").toStdString();
 					}
 					else
 					{
@@ -1050,7 +1112,7 @@ void gui_application::OnShortcutChange()
 {
 	if (m_game_window)
 	{
-		static_cast<gs_frame*>(m_game_window)->update_shortcuts();
+		m_game_window->update_shortcuts();
 	}
 }
 
@@ -1079,7 +1141,7 @@ void gui_application::OnAppStateChanged(Qt::ApplicationState state)
 	}
 
 	const auto emu_state = Emu.GetStatus();
-	const bool is_active = state == Qt::ApplicationActive;
+	const bool is_active = state & Qt::ApplicationActive;
 
 	if (emu_state != system_state::paused && emu_state != system_state::running)
 	{
@@ -1144,15 +1206,24 @@ void gui_application::OnAppStateChanged(Qt::ApplicationState state)
 bool gui_application::native_event_filter::nativeEventFilter([[maybe_unused]] const QByteArray& eventType, [[maybe_unused]] void* message, [[maybe_unused]] qintptr* result)
 {
 #ifdef _WIN32
-	if (!Emu.IsRunning() && !g_raw_mouse_handler)
+	if (!Emu.IsRunning() && !Emu.IsStarting() && !g_raw_mouse_handler)
 	{
 		return false;
 	}
 
 	if (eventType == "windows_generic_MSG")
 	{
-		if (MSG* msg = static_cast<MSG*>(message); msg && msg->message == WM_INPUT)
+		if (MSG* msg = static_cast<MSG*>(message); msg && (msg->message == WM_INPUT || msg->message == WM_KEYDOWN || msg->message == WM_KEYUP || msg->message == WM_DEVICECHANGE))
 		{
+			if (msg->message == WM_DEVICECHANGE && (msg->wParam == DBT_DEVICEARRIVAL || msg->wParam == DBT_DEVICEREMOVECOMPLETE))
+			{
+				if (Emu.IsRunning() || Emu.IsStarting())
+				{
+					handle_hotplug_event(msg->wParam == DBT_DEVICEARRIVAL);
+				}
+				return false;
+			}
+
 			if (auto* handler = g_fxo->try_get<MouseHandlerBase>(); handler && handler->type == mouse_handler::raw)
 			{
 				static_cast<raw_mouse_handler*>(handler)->handle_native_event(*msg);
@@ -1168,3 +1239,40 @@ bool gui_application::native_event_filter::nativeEventFilter([[maybe_unused]] co
 
 	return false;
 }
+
+#ifdef _WIN32
+void gui_application::register_device_notification(WId window_id)
+{
+	if (m_device_notification_handle) return;
+
+	gui_log.notice("Registering device notifications...");
+
+	// Enable usb device hotplug events
+	// Currently only needed for hotplug on windows, as libusb handles other platforms
+	DEV_BROADCAST_DEVICEINTERFACE notification_filter {};
+	notification_filter.dbcc_size = sizeof(DEV_BROADCAST_DEVICEINTERFACE);
+	notification_filter.dbcc_devicetype = DBT_DEVTYP_DEVICEINTERFACE;
+	notification_filter.dbcc_classguid = GUID_DEVINTERFACE_USB_DEVICE;
+
+	m_device_notification_handle = RegisterDeviceNotification(reinterpret_cast<HWND>(window_id), &notification_filter, DEVICE_NOTIFY_WINDOW_HANDLE);
+	if (!m_device_notification_handle )
+	{
+		gui_log.error("RegisterDeviceNotification() failed: %s", fmt::win_error{GetLastError(), nullptr});
+	}
+}
+
+void gui_application::unregister_device_notification()
+{
+	if (m_device_notification_handle)
+	{
+		gui_log.notice("Unregistering device notifications...");
+
+		if (!UnregisterDeviceNotification(m_device_notification_handle))
+		{
+			gui_log.error("UnregisterDeviceNotification() failed: %s", fmt::win_error{GetLastError(), nullptr});
+		}
+
+		m_device_notification_handle = {};
+	}
+}
+#endif

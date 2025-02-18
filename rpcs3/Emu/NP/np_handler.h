@@ -10,8 +10,6 @@
 #include "Emu/Cell/Modules/cellSysutil.h"
 
 #include "Emu/NP/rpcn_client.h"
-#include "Emu/NP/generated/np2_structs_generated.h"
-#include "Emu/NP/signaling_handler.h"
 #include "Emu/NP/np_allocator.h"
 #include "Emu/NP/np_cache.h"
 #include "Emu/NP/np_gui_cache.h"
@@ -150,9 +148,9 @@ namespace np
 		error_code get_basic_event(vm::ptr<s32> event, vm::ptr<SceNpUserInfo> from, vm::ptr<u8> data, vm::ptr<u32> size);
 
 		// Messages-related functions
-		std::optional<std::shared_ptr<std::pair<std::string, message_data>>> get_message(u64 id);
+		std::optional<shared_ptr<std::pair<std::string, message_data>>> get_message(u64 id);
 		void set_message_selected(SceNpBasicAttachmentDataId id, u64 msg_id);
-		std::optional<std::shared_ptr<std::pair<std::string, message_data>>> get_message_selected(SceNpBasicAttachmentDataId id);
+		std::optional<shared_ptr<std::pair<std::string, message_data>>> get_message_selected(SceNpBasicAttachmentDataId id);
 		void clear_message_selected(SceNpBasicAttachmentDataId id);
 		void send_message(const message_data& msg_data, const std::set<std::string>& npids);
 
@@ -206,29 +204,29 @@ namespace np
 		void set_current_gui_ctx_id(u32 id);
 
 		// Score requests
-		void transaction_async_handler(std::unique_lock<shared_mutex> lock, const std::shared_ptr<generic_async_transaction_context>& trans_ctx, u32 req_id, bool async);
-		void get_board_infos(std::shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, vm::ptr<SceNpScoreBoardInfo> boardInfo, bool async);
-		void record_score(std::shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, SceNpScoreValue score, vm::cptr<SceNpScoreComment> scoreComment, const u8* data, u32 data_size, vm::ptr<SceNpScoreRankNumber> tmpRank, bool async);
-		void record_score_data(std::shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, SceNpScoreValue score, u32 totalSize, u32 sendSize, const u8* score_data, bool async);
-		void get_score_data(std::shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, const SceNpId& npId, vm::ptr<u32> totalSize, u32 recvSize, vm::ptr<void> score_data, bool async);
-		void get_score_range(std::shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, SceNpScoreRankNumber startSerialRank, vm::ptr<SceNpScoreRankData> rankArray, u32 rankArraySize, vm::ptr<SceNpScoreComment> commentArray, u32 commentArraySize, vm::ptr<void> infoArray, u32 infoArraySize, u32 arrayNum, vm::ptr<CellRtcTick> lastSortDate, vm::ptr<SceNpScoreRankNumber> totalRecord, bool async, bool deprecated);
-		void get_score_npid(std::shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, const std::vector<std::pair<SceNpId, s32>>& npid_vec, vm::ptr<SceNpScorePlayerRankData> rankArray, u32 rankArraySize, vm::ptr<SceNpScoreComment> commentArray, u32 commentArraySize, vm::ptr<void> infoArray, u32 infoArraySize, u32 arrayNum, vm::ptr<CellRtcTick> lastSortDate, vm::ptr<SceNpScoreRankNumber> totalRecord, bool async, bool deprecated);
-		void get_score_friend(std::shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, bool include_self, vm::ptr<SceNpScoreRankData> rankArray, u32 rankArraySize, vm::ptr<SceNpScoreComment> commentArray, u32 commentArraySize, vm::ptr<void> infoArray, u32 infoArraySize, u32 arrayNum, vm::ptr<CellRtcTick> lastSortDate, vm::ptr<SceNpScoreRankNumber> totalRecord, bool async, bool deprecated);
+		void transaction_async_handler(std::unique_lock<shared_mutex> lock, const shared_ptr<generic_async_transaction_context>& trans_ctx, u32 req_id, bool async);
+		void get_board_infos(shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, vm::ptr<SceNpScoreBoardInfo> boardInfo, bool async);
+		void record_score(shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, SceNpScoreValue score, vm::cptr<SceNpScoreComment> scoreComment, const u8* data, u32 data_size, vm::ptr<SceNpScoreRankNumber> tmpRank, bool async);
+		void record_score_data(shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, SceNpScoreValue score, u32 totalSize, u32 sendSize, const u8* score_data, bool async);
+		void get_score_data(shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, const SceNpId& npId, vm::ptr<u32> totalSize, u32 recvSize, vm::ptr<void> score_data, bool async);
+		void get_score_range(shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, SceNpScoreRankNumber startSerialRank, vm::ptr<SceNpScoreRankData> rankArray, u32 rankArraySize, vm::ptr<SceNpScoreComment> commentArray, u32 commentArraySize, vm::ptr<void> infoArray, u32 infoArraySize, u32 arrayNum, vm::ptr<CellRtcTick> lastSortDate, vm::ptr<SceNpScoreRankNumber> totalRecord, bool async, bool deprecated);
+		void get_score_npid(shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, const std::vector<std::pair<SceNpId, s32>>& npid_vec, vm::ptr<SceNpScorePlayerRankData> rankArray, u32 rankArraySize, vm::ptr<SceNpScoreComment> commentArray, u32 commentArraySize, vm::ptr<void> infoArray, u32 infoArraySize, u32 arrayNum, vm::ptr<CellRtcTick> lastSortDate, vm::ptr<SceNpScoreRankNumber> totalRecord, bool async, bool deprecated);
+		void get_score_friend(shared_ptr<score_transaction_ctx>& trans_ctx, SceNpScoreBoardId boardId, bool include_self, vm::ptr<SceNpScoreRankData> rankArray, u32 rankArraySize, vm::ptr<SceNpScoreComment> commentArray, u32 commentArraySize, vm::ptr<void> infoArray, u32 infoArraySize, u32 arrayNum, vm::ptr<CellRtcTick> lastSortDate, vm::ptr<SceNpScoreRankNumber> totalRecord, bool async, bool deprecated);
 
 		// TUS requests
-		void tus_set_multislot_variable(std::shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, vm::cptr<SceNpTusSlotId> slotIdArray, vm::cptr<s64> variableArray, s32 arrayNum, bool vuser, bool async);
-		void tus_get_multislot_variable(std::shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, vm::cptr<SceNpTusSlotId> slotIdArray, vm::ptr<SceNpTusVariable> variableArray, s32 arrayNum, bool vuser, bool async);
-		void tus_get_multiuser_variable(std::shared_ptr<tus_transaction_ctx>& trans_ctx, std::vector<SceNpOnlineId> targetNpIdArray, SceNpTusSlotId slotId, vm::ptr<SceNpTusVariable> variableArray, s32 arrayNum, bool vuser, bool async);
-		void tus_get_friends_variable(std::shared_ptr<tus_transaction_ctx>& trans_ctx, SceNpTusSlotId slotId, s32 includeSelf, s32 sortType, vm::ptr<SceNpTusVariable> variableArray,s32 arrayNum, bool async);
-		void tus_add_and_get_variable(std::shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, SceNpTusSlotId slotId, s64 inVariable, vm::ptr<SceNpTusVariable> outVariable, vm::ptr<SceNpTusAddAndGetVariableOptParam> option, bool vuser, bool async);
-		void tus_try_and_set_variable(std::shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, SceNpTusSlotId slotId, s32 opeType, s64 variable, vm::ptr<SceNpTusVariable> resultVariable, vm::ptr<SceNpTusTryAndSetVariableOptParam> option, bool vuser, bool async);
-		void tus_delete_multislot_variable(std::shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, vm::cptr<SceNpTusSlotId> slotIdArray, s32 arrayNum, bool vuser, bool async);
-		void tus_set_data(std::shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, SceNpTusSlotId slotId, u32 totalSize, u32 sendSize, vm::cptr<void> data, vm::cptr<SceNpTusDataInfo> info, vm::ptr<SceNpTusSetDataOptParam> option, bool vuser, bool async);
-		void tus_get_data(std::shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, SceNpTusSlotId slotId, vm::ptr<SceNpTusDataStatus> dataStatus, vm::ptr<void> data, u32 recvSize, bool vuser, bool async);
-		void tus_get_multislot_data_status(std::shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, vm::cptr<SceNpTusSlotId> slotIdArray, vm::ptr<SceNpTusDataStatus> statusArray, s32 arrayNum, bool vuser, bool async);
-		void tus_get_multiuser_data_status(std::shared_ptr<tus_transaction_ctx>& trans_ctx, std::vector<SceNpOnlineId> targetNpIdArray, SceNpTusSlotId slotId, vm::ptr<SceNpTusDataStatus> statusArray, s32 arrayNum, bool vuser, bool async);
-		void tus_get_friends_data_status(std::shared_ptr<tus_transaction_ctx>& trans_ctx, SceNpTusSlotId slotId, s32 includeSelf, s32 sortType, vm::ptr<SceNpTusDataStatus> statusArray, s32 arrayNum, bool async);
-		void tus_delete_multislot_data(std::shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, vm::cptr<SceNpTusSlotId> slotIdArray, s32 arrayNum, bool vuser, bool async);
+		void tus_set_multislot_variable(shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, vm::cptr<SceNpTusSlotId> slotIdArray, vm::cptr<s64> variableArray, s32 arrayNum, bool vuser, bool async);
+		void tus_get_multislot_variable(shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, vm::cptr<SceNpTusSlotId> slotIdArray, vm::ptr<SceNpTusVariable> variableArray, s32 arrayNum, bool vuser, bool async);
+		void tus_get_multiuser_variable(shared_ptr<tus_transaction_ctx>& trans_ctx, std::vector<SceNpOnlineId> targetNpIdArray, SceNpTusSlotId slotId, vm::ptr<SceNpTusVariable> variableArray, s32 arrayNum, bool vuser, bool async);
+		void tus_get_friends_variable(shared_ptr<tus_transaction_ctx>& trans_ctx, SceNpTusSlotId slotId, s32 includeSelf, s32 sortType, vm::ptr<SceNpTusVariable> variableArray,s32 arrayNum, bool async);
+		void tus_add_and_get_variable(shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, SceNpTusSlotId slotId, s64 inVariable, vm::ptr<SceNpTusVariable> outVariable, vm::ptr<SceNpTusAddAndGetVariableOptParam> option, bool vuser, bool async);
+		void tus_try_and_set_variable(shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, SceNpTusSlotId slotId, s32 opeType, s64 variable, vm::ptr<SceNpTusVariable> resultVariable, vm::ptr<SceNpTusTryAndSetVariableOptParam> option, bool vuser, bool async);
+		void tus_delete_multislot_variable(shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, vm::cptr<SceNpTusSlotId> slotIdArray, s32 arrayNum, bool vuser, bool async);
+		void tus_set_data(shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, SceNpTusSlotId slotId, u32 totalSize, u32 sendSize, vm::cptr<void> data, vm::cptr<SceNpTusDataInfo> info, vm::ptr<SceNpTusSetDataOptParam> option, bool vuser, bool async);
+		void tus_get_data(shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, SceNpTusSlotId slotId, vm::ptr<SceNpTusDataStatus> dataStatus, vm::ptr<void> data, u32 recvSize, bool vuser, bool async);
+		void tus_get_multislot_data_status(shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, vm::cptr<SceNpTusSlotId> slotIdArray, vm::ptr<SceNpTusDataStatus> statusArray, s32 arrayNum, bool vuser, bool async);
+		void tus_get_multiuser_data_status(shared_ptr<tus_transaction_ctx>& trans_ctx, std::vector<SceNpOnlineId> targetNpIdArray, SceNpTusSlotId slotId, vm::ptr<SceNpTusDataStatus> statusArray, s32 arrayNum, bool vuser, bool async);
+		void tus_get_friends_data_status(shared_ptr<tus_transaction_ctx>& trans_ctx, SceNpTusSlotId slotId, s32 includeSelf, s32 sortType, vm::ptr<SceNpTusDataStatus> statusArray, s32 arrayNum, bool async);
+		void tus_delete_multislot_data(shared_ptr<tus_transaction_ctx>& trans_ctx, const SceNpOnlineId& targetNpId, vm::cptr<SceNpTusSlotId> slotIdArray, s32 arrayNum, bool vuser, bool async);
 
 		// Local functions
 		std::pair<error_code, std::optional<SceNpId>> local_get_npid(u64 room_id, u16 member_id);
@@ -295,79 +293,78 @@ namespace np
 		bool error_and_disconnect(const std::string& error_msg);
 
 		// Notification handlers
-		void notif_user_joined_room(std::vector<u8>& data);
-		void notif_user_left_room(std::vector<u8>& data);
-		void notif_room_destroyed(std::vector<u8>& data);
-		void notif_updated_room_data_internal(std::vector<u8>& data);
-		void notif_updated_room_member_data_internal(std::vector<u8>& data);
-		void notif_p2p_connect(std::vector<u8>& data);
-		void notif_signaling_info(std::vector<u8>& data);
-		void notif_room_message_received(std::vector<u8>& data);
+		void notif_user_joined_room(vec_stream& noti);
+		void notif_user_left_room(vec_stream& noti);
+		void notif_room_destroyed(vec_stream& noti);
+		void notif_updated_room_data_internal(vec_stream& noti);
+		void notif_updated_room_member_data_internal(vec_stream& noti);
+		void notif_signaling_helper(vec_stream& noti);
+		void notif_room_message_received(vec_stream& noti);
 
-		void generic_gui_notification_handler(std::vector<u8>& data, std::string_view name, s32 notification_type);
+		void generic_gui_notification_handler(vec_stream& noti, std::string_view name, s32 notification_type);
 
-		void notif_member_joined_room_gui(std::vector<u8>& data);
-		void notif_member_left_room_gui(std::vector<u8>& data);
-		void notif_room_disappeared_gui(std::vector<u8>& data);
-		void notif_room_owner_changed_gui(std::vector<u8>& data);
-		void notif_user_kicked_gui(std::vector<u8>& data);
-		void notif_quickmatch_complete_gui(std::vector<u8>& data);
+		void notif_member_joined_room_gui(vec_stream& noti);
+		void notif_member_left_room_gui(vec_stream& noti);
+		void notif_room_disappeared_gui(vec_stream& noti);
+		void notif_room_owner_changed_gui(vec_stream& noti);
+		void notif_user_kicked_gui(vec_stream& noti);
+		void notif_quickmatch_complete_gui(vec_stream& noti);
 
 		// Reply handlers
-		bool reply_get_world_list(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_create_join_room(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_join_room(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_leave_room(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_search_room(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_roomdata_external_list(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_set_roomdata_external(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_roomdata_internal(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_set_roomdata_internal(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_set_roommemberdata_internal(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_roommemberdata_internal(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_set_userinfo(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_ping_info(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_send_room_message(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_req_sign_infos(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_req_ticket(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_board_infos(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_record_score(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_record_score_data(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_score_data(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_score_range(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_score_friends(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_score_npid(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_set_multislot_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_multislot_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_multiuser_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_friends_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_add_and_get_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_try_and_set_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_delete_multislot_variable(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_set_data(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_data(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_multislot_data_status(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_multiuser_data_status(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_get_friends_data_status(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_tus_delete_multislot_data(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_create_room_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_join_room_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_leave_room_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_room_list_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_set_room_search_flag_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_room_search_flag_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_set_room_info_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_get_room_info_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_quickmatch_gui(u32 req_id, std::vector<u8>& reply_data);
-		bool reply_searchjoin_gui(u32 req_id, std::vector<u8>& reply_data);
+		void reply_get_world_list(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_create_join_room(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_join_room(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_leave_room(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_search_room(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_get_roomdata_external_list(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_set_roomdata_external(u32 req_id, rpcn::ErrorType error);
+		void reply_get_roomdata_internal(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_set_roomdata_internal(u32 req_id, rpcn::ErrorType error);
+		void reply_set_roommemberdata_internal(u32 req_id, rpcn::ErrorType error);
+		void reply_get_roommemberdata_internal(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_set_userinfo(u32 req_id, rpcn::ErrorType error);
+		void reply_get_ping_info(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_send_room_message(u32 req_id, rpcn::ErrorType error);
+		void reply_req_sign_infos(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_req_ticket(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_get_board_infos(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_record_score(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_record_score_data(u32 req_id, rpcn::ErrorType error);
+		void reply_get_score_data(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_get_score_range(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_get_score_friends(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_get_score_npid(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_set_multislot_variable(u32 req_id, rpcn::ErrorType error);
+		void reply_tus_get_multislot_variable(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_get_multiuser_variable(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_get_friends_variable(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_add_and_get_variable(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_try_and_set_variable(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_delete_multislot_variable(u32 req_id, rpcn::ErrorType error);
+		void reply_tus_set_data(u32 req_id, rpcn::ErrorType error);
+		void reply_tus_get_data(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_get_multislot_data_status(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_get_multiuser_data_status(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_get_friends_data_status(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_tus_delete_multislot_data(u32 req_id, rpcn::ErrorType error);
+		void reply_create_room_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_join_room_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_leave_room_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_get_room_list_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_set_room_search_flag_gui(u32 req_id, rpcn::ErrorType error);
+		void reply_get_room_search_flag_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_set_room_info_gui(u32 req_id, rpcn::ErrorType error);
+		void reply_get_room_info_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_quickmatch_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_searchjoin_gui(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
 
 		// Helper functions
 		std::pair<bool, bool> get_match2_context_options(u32 ctx_id);
-		bool handle_GetScoreResponse(u32 req_id, std::vector<u8>& reply_data, bool simple_result = false);
-		bool handle_tus_no_data(u32 req_id, std::vector<u8>& reply_data);
-		bool handle_TusVarResponse(u32 req_id, std::vector<u8>& reply_data);
-		bool handle_TusVariable(u32 req_id, std::vector<u8>& reply_data);
-		bool handle_TusDataStatusResponse(u32 req_id, std::vector<u8>& reply_data);
+		void handle_GetScoreResponse(u32 req_id, rpcn::ErrorType error, vec_stream& reply, bool simple_result = false);
+		void handle_tus_no_data(u32 req_id, rpcn::ErrorType error);
+		void handle_TusVarResponse(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void handle_TusVariable(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void handle_TusDataStatusResponse(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
 
 		struct callback_info
 		{
@@ -494,7 +491,7 @@ namespace np
 
 		// Async transaction threads
 		shared_mutex mutex_async_transactions;
-		std::unordered_map<u32, std::shared_ptr<generic_async_transaction_context>> async_transactions; // (req_id, transaction_ctx)
+		std::unordered_map<u32, shared_ptr<generic_async_transaction_context>> async_transactions; // (req_id, transaction_ctx)
 
 		// RPCN
 		shared_mutex mutex_rpcn;
@@ -529,7 +526,7 @@ namespace np
 		void add_gui_request(u32 req_id, u32 ctx_id);
 		void remove_gui_request(u32 req_id);
 		u32 take_gui_request(u32 req_id);
-		std::shared_ptr<matching_ctx> take_pending_gui_request(u32 req_id);
+		shared_ptr<matching_ctx> take_pending_gui_request(u32 req_id);
 
 		shared_mutex mutex_quickmatching;
 		std::map<SceNpRoomId, u32> pending_quickmatching;

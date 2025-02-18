@@ -1,7 +1,6 @@
 #include "stdafx.h"
 #include "util/types.hpp"
 #include "util/logs.hpp"
-#include "util/asm.hpp"
 #include "util/v128.hpp"
 #include "util/simd.hpp"
 #include "Utilities/File.h"
@@ -12,7 +11,6 @@
 #include "System.h"
 
 #include <set>
-#include <any>
 #include <span>
 
 LOG_CHANNEL(sys_log, "SYS");
@@ -42,7 +40,7 @@ static std::array<serial_ver_t, 27> s_serial_versions;
 		return ::s_serial_versions[identifier].current_version;\
 	}
 
-SERIALIZATION_VER(global_version, 0,                            16) // For stuff not listed here
+SERIALIZATION_VER(global_version, 0,                            19) // For stuff not listed here
 SERIALIZATION_VER(ppu, 1,                                       1, 2/*PPU sleep order*/, 3/*PPU FNID and module*/)
 SERIALIZATION_VER(spu, 2,                                       1)
 SERIALIZATION_VER(lv2_sync, 3,                                  1)
@@ -71,8 +69,8 @@ SERIALIZATION_VER(sceNp, 11)
 
 SERIALIZATION_VER(cellVdec, 12,                                 1)
 SERIALIZATION_VER(cellAudio, 13,                                1)
-SERIALIZATION_VER(cellCamera, 14,                               1)
-SERIALIZATION_VER(cellGem, 15,                                  1)
+SERIALIZATION_VER(cellCamera, 14,                               1, 2/*gem_camera_shared*/)
+SERIALIZATION_VER(cellGem, 15,                                  1, 2/*calibration_status_flags*/, 3/*video_conversion*/)
 SERIALIZATION_VER(sceNpTrophy, 16,                              1)
 SERIALIZATION_VER(cellMusic, 17,                                1)
 SERIALIZATION_VER(cellVoice, 18,                                1)
@@ -160,6 +158,60 @@ std::vector<version_entry> get_savestate_versioning_data(fs::file&& file, std::s
 
 	std::vector<version_entry> ver_data = ar.pop<std::vector<version_entry>>();
 	return ver_data;
+}
+
+std::shared_ptr<utils::serial> make_savestate_reader(const std::string& path)
+{
+	std::shared_ptr<utils::serial> ar;
+
+	fs::file save{path, fs::isfile + fs::read};
+
+	if (!save)
+	{
+		return ar;
+	}
+
+	if (path.ends_with(".SAVESTAT") && save.size() >= 8 && save.read<u64>() == "RPCS3SAV"_u64)
+	{
+		ar = std::make_shared<utils::serial>();
+		ar->set_reading_state();
+
+		ar->m_file_handler = make_uncompressed_serialization_file_handler(std::move(save));
+	}
+	else if (path.ends_with(".zst"))
+	{
+		ar = std::make_shared<utils::serial>();
+		ar->set_reading_state();
+
+		ar->m_file_handler = make_compressed_zstd_serialization_file_handler(std::move(save));
+
+		if (ar->try_read<u64>().second != "RPCS3SAV"_u64)
+		{
+			ar.reset();
+		}
+		else
+		{
+			ar->pos = 0;
+		}
+	}
+	else if (path.ends_with(".gz"))
+	{
+		ar = std::make_shared<utils::serial>();
+		ar->set_reading_state();
+
+		ar->m_file_handler = make_compressed_serialization_file_handler(std::move(save));
+
+		if (ar->try_read<u64>().second != "RPCS3SAV"_u64)
+		{
+			ar.reset();
+		}
+		else
+		{
+			ar->pos = 0;
+		}
+	}
+
+	return ar;
 }
 
 bool is_savestate_version_compatible(const std::vector<version_entry>& data, bool is_boot_check)
@@ -256,6 +308,15 @@ bool is_savestate_compatible(fs::file&& file, std::string_view filepath)
 	return is_savestate_version_compatible(get_savestate_versioning_data(std::move(file), filepath), false);
 }
 
+bool is_savestate_compatible(const std::string& filepath)
+{
+	if (fs::file file{filepath, fs::isfile + fs::read})
+	{
+		return is_savestate_compatible(std::move(file), filepath);
+	}
+	return false;
+}
+
 std::vector<version_entry> read_used_savestate_versions()
 {
 	std::vector<version_entry> used_serial;
@@ -322,7 +383,10 @@ bool boot_last_savestate(bool testing)
 		if (result)
 		{
 			sys_log.success("Booting the most recent savestate \'%s\' using the Reload shortcut.", savestate_path);
-			Emu.GracefulShutdown(false);
+
+			// Make sure we keep the game window opened
+			Emu.SetContinuousMode(true);
+			Emu.GracefulShutdown(false, false, false, true);
 
 			if (game_boot_result error = Emu.BootGame(savestate_path, "", true); error != game_boot_result::no_errors)
 			{
@@ -372,6 +436,7 @@ namespace stx
 		{
 			// Reset, probably a new utils::serial object
 			s_tls_call_count = 1;
+			s_tls_object_name = "none"sv;
 		}
 
 		s_tls_current_pos = ar.pos;
@@ -392,7 +457,7 @@ namespace stx
 		if ((saved ^ tag) & data_mask)
 		{
 			ensure(!ar.is_writing());
-			fmt::throw_exception("serial_breathe_and_tag(%u): %s, object: '%s', next-object: '%s', expected/tag: 0x%x != 0x%x,", s_tls_call_count, ar, s_tls_object_name, name, tag, saved);
+			fmt::throw_exception("serial_breathe_and_tag(%u): %s\nobject: '%s', next-object: '%s', expected/tag: 0x%x != 0x%x,", s_tls_call_count, ar, s_tls_object_name, name, tag, saved);
 		}
 
 		s_tls_object_name = name;

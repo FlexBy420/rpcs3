@@ -7,12 +7,9 @@
 #include "VKHelpers.h"
 #include "vkutils/barriers.h"
 #include "vkutils/buffer_object.h"
-#include "vkutils/data_heap.h"
 #include "vkutils/device.h"
 #include "vkutils/image.h"
 #include "vkutils/scratch.h"
-
-#include <span>
 
 namespace vk
 {
@@ -189,6 +186,8 @@ namespace vk
 			case driver_vendor::DOZEN:
 			case driver_vendor::LAVAPIPE:
 			case driver_vendor::V3DV:
+			case driver_vendor::HONEYKRISP:
+			case driver_vendor::PANVK:
 				break;
 			}
 

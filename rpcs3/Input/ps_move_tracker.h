@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Emu/Cell/Modules/cellGem.h"
+
 #ifdef HAVE_OPENCV
 	constexpr bool g_ps_move_tracking_supported = true;
 #else
@@ -8,13 +10,13 @@
 
 struct ps_move_info
 {
-	bool valid = false;
-	f32 radius = 0.0f;
-	f32 distance = 0.0f;
-	u32 x_pos = 0;
-	u32 y_pos = 0;
-	u32 x_max = 0;
-	u32 y_max = 0;
+	bool valid = false;     // The tracking result
+	f32 radius = 0.0f;      // Radius of the sphere in pixels
+	f32 distance_mm = 0.0f; // Distance from sphere to camera in mm
+	u32 x_pos = 0;          // X position in pixels
+	u32 y_pos = 0;          // Y position in pixels
+	u32 x_max = 0;          // Maximum X position in pixels
+	u32 y_max = 0;          // Maximum Y position in pixels
 };
 
 template <bool DiagnosticsEnabled = false>
@@ -52,8 +54,8 @@ public:
 	const std::vector<u8>& gray() { return m_image_gray; }
 	const std::vector<u8>& binary(u32 index) { return ::at32(m_image_binary, index); }
 
-	static std::tuple<u8, u8, u8> hsv_to_rgb(u16 hue, float saturation, float value);
-	static std::tuple<s16, float, float> rgb_to_hsv(float r, float g, float b);
+	static std::tuple<u8, u8, u8> hsv_to_rgb(u16 hue, f32 saturation, f32 value);
+	static std::tuple<s16, f32, f32> rgb_to_hsv(f32 r, f32 g, f32 b);
 
 private:
 	struct ps_move_config
@@ -70,6 +72,10 @@ private:
 
 		void calculate_values();
 	};
+
+	void set_valid(ps_move_info& info, u32 index, bool valid);
+
+	void draw_sphere_size_range(f32 result_radius);
 
 	u32 m_width = 0;
 	u32 m_height = 0;
@@ -90,6 +96,8 @@ private:
 
 	std::array<std::vector<u8>, CELL_GEM_MAX_NUM> m_image_hue_filtered{};
 	std::array<std::vector<u8>, CELL_GEM_MAX_NUM> m_image_binary{};
+	std::array<u32, CELL_GEM_MAX_NUM> m_fail_count{};
+	std::array<u32, CELL_GEM_MAX_NUM> m_shape_fail_count{};
 
 	std::array<u32, 360> m_hues{};
 	std::array<ps_move_info, CELL_GEM_MAX_NUM> m_info{};

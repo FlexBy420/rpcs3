@@ -3,7 +3,6 @@
 #include "GLSLCommon.h"
 #include "RSXFragmentProgram.h"
 
-#include "Emu/system_config.h"
 #include "Emu/RSX/gcm_enums.h"
 #include "Utilities/StrFmt.h"
 
@@ -260,6 +259,11 @@ namespace glsl
 				{
 					enabled_options.push_back("_EMULATE_ZCLIP_XFORM_FALLBACK");
 				}
+			}
+
+			if (props.require_instanced_render)
+			{
+				enabled_options.push_back("_ENABLE_INSTANCED_CONSTANTS");
 			}
 
 			// Import vertex header

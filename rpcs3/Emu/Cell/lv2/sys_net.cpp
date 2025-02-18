@@ -15,7 +15,6 @@
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wold-style-cast"
 #endif
-#include <errno.h>
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -24,7 +23,6 @@
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <poll.h>
 #ifdef __clang__
 #pragma GCC diagnostic pop
@@ -33,9 +31,7 @@
 
 #include "Emu/NP/np_handler.h"
 #include "Emu/NP/np_helpers.h"
-#include "Emu/NP/np_dnshook.h"
-
-#include <chrono>
+#include "Emu/Cell/timers.hpp"
 #include <shared_mutex>
 
 #include "sys_net/network_context.h"
@@ -54,7 +50,7 @@ void fmt_class_string<sys_net_error>::format(std::string& out, u64 arg)
 {
 	format_enum(out, arg, [](auto error)
 		{
-			switch (s32 _error = error)
+			switch (static_cast<s32>(error))
 			{
 #define SYS_NET_ERROR_CASE(x) \
 	case -x: return "-" #x;   \
@@ -266,25 +262,25 @@ lv2_socket::lv2_socket(utils::serial& ar, lv2_socket_type _type)
 	ar(last_bound_addr);
 }
 
-std::shared_ptr<void> lv2_socket::load(utils::serial& ar)
+std::function<void(void*)> lv2_socket::load(utils::serial& ar)
 {
 	const lv2_socket_type type{ar};
 
-	std::shared_ptr<lv2_socket> sock_lv2;
+	shared_ptr<lv2_socket> sock_lv2;
 
 	switch (type)
 	{
 	case SYS_NET_SOCK_STREAM:
 	case SYS_NET_SOCK_DGRAM:
 	{
-		auto lv2_native = std::make_shared<lv2_socket_native>(ar, type);
+		auto lv2_native = make_shared<lv2_socket_native>(ar, type);
 		ensure(lv2_native->create_socket() >= 0);
 		sock_lv2 = std::move(lv2_native);
 		break;
 	}
-	case SYS_NET_SOCK_RAW: sock_lv2 = std::make_shared<lv2_socket_raw>(ar, type); break;
-	case SYS_NET_SOCK_DGRAM_P2P: sock_lv2 = std::make_shared<lv2_socket_p2p>(ar, type); break;
-	case SYS_NET_SOCK_STREAM_P2P: sock_lv2 = std::make_shared<lv2_socket_p2ps>(ar, type); break;
+	case SYS_NET_SOCK_RAW: sock_lv2 = make_shared<lv2_socket_raw>(ar, type); break;
+	case SYS_NET_SOCK_DGRAM_P2P: sock_lv2 = make_shared<lv2_socket_p2p>(ar, type); break;
+	case SYS_NET_SOCK_STREAM_P2P: sock_lv2 = make_shared<lv2_socket_p2ps>(ar, type); break;
 	}
 
 	if (std::memcmp(&sock_lv2->last_bound_addr, std::array<u8, 16>{}.data(), 16))
@@ -293,7 +289,7 @@ std::shared_ptr<void> lv2_socket::load(utils::serial& ar)
 		sock_lv2->bind(sock_lv2->last_bound_addr);
 	}
 
-	return sock_lv2;
+	return [ptr = sock_lv2](void* storage) { *static_cast<atomic_ptr<lv2_socket>*>(storage) = ptr; };;
 }
 
 void lv2_socket::save(utils::serial& ar, bool save_only_this_class)
@@ -352,7 +348,7 @@ error_code sys_net_bnet_accept(ppu_thread& ppu, s32 s, vm::ptr<sys_net_sockaddr>
 
 	s32 result = 0;
 	sys_net_sockaddr sn_addr{};
-	std::shared_ptr<lv2_socket> new_socket{};
+	shared_ptr<lv2_socket> new_socket{};
 
 	const auto sock = idm::check<lv2_socket>(s, [&, notify = lv2_obj::notify_all_t()](lv2_socket& sock)
 		{
@@ -465,7 +461,7 @@ error_code sys_net_bnet_bind(ppu_thread& ppu, s32 s, vm::cptr<sys_net_sockaddr> 
 		return -SYS_NET_EINVAL;
 	}
 
-	if (!idm::check<lv2_socket>(s))
+	if (!idm::check_unlocked<lv2_socket>(s))
 	{
 		return -SYS_NET_EBADF;
 	}
@@ -514,7 +510,7 @@ error_code sys_net_bnet_connect(ppu_thread& ppu, s32 s, vm::ptr<sys_net_sockaddr
 		return -SYS_NET_EAFNOSUPPORT;
 	}
 
-	if (!idm::check<lv2_socket>(s))
+	if (!idm::check_unlocked<lv2_socket>(s))
 	{
 		return -SYS_NET_EBADF;
 	}
@@ -1194,14 +1190,14 @@ error_code sys_net_bnet_socket(ppu_thread& ppu, lv2_socket_family family, lv2_so
 		return -SYS_NET_EPROTONOSUPPORT;
 	}
 
-	std::shared_ptr<lv2_socket> sock_lv2;
+	shared_ptr<lv2_socket> sock_lv2;
 
 	switch (type)
 	{
 	case SYS_NET_SOCK_STREAM:
 	case SYS_NET_SOCK_DGRAM:
 	{
-		auto lv2_native = std::make_shared<lv2_socket_native>(family, type, protocol);
+		auto lv2_native = make_shared<lv2_socket_native>(family, type, protocol);
 		if (s32 result = lv2_native->create_socket(); result < 0)
 		{
 			return sys_net_error{result};
@@ -1210,9 +1206,9 @@ error_code sys_net_bnet_socket(ppu_thread& ppu, lv2_socket_family family, lv2_so
 		sock_lv2 = std::move(lv2_native);
 		break;
 	}
-	case SYS_NET_SOCK_RAW: sock_lv2 = std::make_shared<lv2_socket_raw>(family, type, protocol); break;
-	case SYS_NET_SOCK_DGRAM_P2P: sock_lv2 = std::make_shared<lv2_socket_p2p>(family, type, protocol); break;
-	case SYS_NET_SOCK_STREAM_P2P: sock_lv2 = std::make_shared<lv2_socket_p2ps>(family, type, protocol); break;
+	case SYS_NET_SOCK_RAW: sock_lv2 = make_shared<lv2_socket_raw>(family, type, protocol); break;
+	case SYS_NET_SOCK_DGRAM_P2P: sock_lv2 = make_shared<lv2_socket_p2p>(family, type, protocol); break;
+	case SYS_NET_SOCK_STREAM_P2P: sock_lv2 = make_shared<lv2_socket_p2ps>(family, type, protocol); break;
 	}
 
 	const s32 s = idm::import_existing<lv2_socket>(sock_lv2);
@@ -1413,6 +1409,7 @@ error_code sys_net_bnet_poll(ppu_thread& ppu, vm::ptr<sys_net_pollfd> fds, s32 n
 				}
 
 				has_timedout = network_clear_queue(ppu);
+				clear_ppu_to_awake(ppu);
 				ppu.state -= cpu_flag::signal;
 				break;
 			}
@@ -1646,6 +1643,7 @@ error_code sys_net_bnet_select(ppu_thread& ppu, s32 nfds, vm::ptr<sys_net_fd_set
 				}
 
 				has_timedout = network_clear_queue(ppu);
+				clear_ppu_to_awake(ppu);
 				ppu.state -= cpu_flag::signal;
 				break;
 			}
@@ -1731,6 +1729,10 @@ error_code lv2_socket::abort_socket(s32 flags)
 		if (!ppu)
 			continue;
 
+		// Avoid possible double signaling
+		network_clear_queue(*ppu);
+		clear_ppu_to_awake(*ppu);
+
 		sys_net.warning("lv2_socket::abort_socket(): waking up \"%s\": (func: %s, r3=0x%x, r4=0x%x, r5=0x%x, r6=0x%x)", ppu->get_name(), ppu->current_function, ppu->gpr[3], ppu->gpr[4], ppu->gpr[5], ppu->gpr[6]);
 		ppu->gpr[3] = static_cast<u64>(-SYS_NET_EINTR);
 		lv2_obj::append(ppu.get());
@@ -1769,7 +1771,7 @@ error_code sys_net_abort(ppu_thread& ppu, s32 type, u64 arg, s32 flags)
 	{
 		std::lock_guard nw_lock(g_fxo->get<network_context>().mutex_thread_loop);
 
-		const auto sock = idm::get<lv2_socket>(static_cast<u32>(arg));
+		const auto sock = idm::get_unlocked<lv2_socket>(static_cast<u32>(arg));
 
 		if (!sock)
 		{

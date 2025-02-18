@@ -44,7 +44,7 @@ add_subdirectory(libpng EXCLUDE_FROM_ALL)
 
 # pugixml
 if (USE_SYSTEM_PUGIXML)
-	pkg_check_modules(PUGIXML REQUIRED IMPORTED_TARGET pugixml>=1.11)
+	pkg_check_modules(PUGIXML REQUIRED IMPORTED_TARGET pugixml>=1.15)
 	add_library(pugixml INTERFACE)
 	target_link_libraries(pugixml INTERFACE PkgConfig::PUGIXML)
 else()
@@ -87,26 +87,15 @@ endif()
 add_subdirectory(hidapi)
 
 
-# Vulkan
+# glslang
 add_subdirectory(glslang EXCLUDE_FROM_ALL)
+add_library(3rdparty_glslang INTERFACE)
+target_link_libraries(3rdparty_glslang INTERFACE SPIRV)
 
 
 # yaml-cpp
 add_subdirectory(yaml-cpp)
 
-
-# xxHash
-if (USE_SYSTEM_XXHASH)
-	pkg_check_modules(XXHASH REQUIRED IMPORTED_TARGET libxxhash)
-	add_library(xxhash INTERFACE)
-	target_link_libraries(xxhash INTERFACE PkgConfig::XXHASH)
-else()
-	set(XXHASH_BUNDLED_MODE ON)
-	set(XXHASH_BUILD_XXHSUM OFF)
-	set(BUILD_SHARED_LIBS OFF CACHE BOOL "Make xxHash build static libs")
-	add_subdirectory(xxHash/cmake_unofficial EXCLUDE_FROM_ALL)
-	target_include_directories(xxhash INTERFACE xxHash)
-endif()
 
 # OpenGL
 
@@ -190,7 +179,7 @@ if(USE_VULKAN)
 	if(VULKAN_FOUND)
 		add_library(3rdparty_vulkan INTERFACE)
 		target_compile_definitions(3rdparty_vulkan INTERFACE -DHAVE_VULKAN)
-		target_link_libraries(3rdparty_vulkan INTERFACE SPIRV Vulkan::Vulkan)
+		target_link_libraries(3rdparty_vulkan INTERFACE Vulkan::Vulkan)
 
 		if(UNIX AND NOT APPLE)
 			find_package(Wayland)
@@ -346,6 +335,9 @@ add_subdirectory(rtmidi EXCLUDE_FROM_ALL)
 # OPENCV
 add_subdirectory(opencv EXCLUDE_FROM_ALL)
 
+# FUSION
+add_subdirectory(fusion EXCLUDE_FROM_ALL)
+
 # add nice ALIAS targets for ease of use
 if(USE_SYSTEM_LIBUSB)
 	add_library(3rdparty::libusb ALIAS usb-1.0-shared)
@@ -357,8 +349,8 @@ add_library(3rdparty::zstd ALIAS 3rdparty_zstd)
 add_library(3rdparty::7zip ALIAS 3rdparty_7zip)
 add_library(3rdparty::flatbuffers ALIAS 3rdparty_flatbuffers)
 add_library(3rdparty::pugixml ALIAS pugixml)
+add_library(3rdparty::glslang ALIAS 3rdparty_glslang)
 add_library(3rdparty::yaml-cpp ALIAS yaml-cpp)
-add_library(3rdparty::xxhash ALIAS xxhash)
 add_library(3rdparty::hidapi ALIAS 3rdparty_hidapi)
 add_library(3rdparty::libpng ALIAS ${LIBPNG_TARGET})
 add_library(3rdparty::opengl ALIAS 3rdparty_opengl)
@@ -377,3 +369,4 @@ add_library(3rdparty::sdl2 ALIAS ${SDL2_TARGET})
 add_library(3rdparty::miniupnpc ALIAS libminiupnpc-static)
 add_library(3rdparty::rtmidi ALIAS rtmidi)
 add_library(3rdparty::opencv ALIAS ${OPENCV_TARGET})
+add_library(3rdparty::fusion ALIAS Fusion)

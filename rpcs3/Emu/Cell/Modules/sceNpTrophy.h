@@ -1,10 +1,10 @@
 #pragma once
 
 #include "util/types.hpp"
-#include "util/endian.hpp"
 #include "Emu/Memory/vm_ptr.h"
 #include "Emu/Cell/ErrorCodes.h"
 #include <vector>
+#include <mutex>
 
 // Error codes
 enum SceNpTrophyError : u32
@@ -167,4 +167,10 @@ public:
 	virtual ~TrophyNotificationBase();
 
 	virtual s32 ShowTrophyNotification(const SceNpTrophyDetails& trophy, const std::vector<uchar>& trophyIconBfr) = 0;
+};
+
+struct current_trophy_name
+{
+	std::mutex mtx;
+	std::string name;
 };

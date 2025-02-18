@@ -57,17 +57,9 @@ void lv2_socket_native::save(utils::serial& ar)
 	ar(is_socket_connected());
 }
 
-lv2_socket_native::~lv2_socket_native()
+lv2_socket_native::~lv2_socket_native() noexcept
 {
-	std::lock_guard lock(mutex);
-	if (socket)
-	{
-#ifdef _WIN32
-		::closesocket(socket);
-#else
-		::close(socket);
-#endif
-	}
+	lv2_socket_native::close();
 }
 
 s32 lv2_socket_native::create_socket()
@@ -95,9 +87,9 @@ s32 lv2_socket_native::create_socket()
 	return CELL_OK;
 }
 
-void lv2_socket_native::set_socket(socket_type socket, lv2_socket_family family, lv2_socket_type type, lv2_ip_protocol protocol)
+void lv2_socket_native::set_socket(socket_type native_socket, lv2_socket_family family, lv2_socket_type type, lv2_ip_protocol protocol)
 {
-	this->socket   = socket;
+	this->native_socket = native_socket;
 	this->family   = family;
 	this->type     = type;
 	this->protocol = protocol;
@@ -106,7 +98,7 @@ void lv2_socket_native::set_socket(socket_type socket, lv2_socket_family family,
 	set_non_blocking();
 }
 
-std::tuple<bool, s32, std::shared_ptr<lv2_socket>, sys_net_sockaddr> lv2_socket_native::accept(bool is_lock)
+std::tuple<bool, s32, shared_ptr<lv2_socket>, sys_net_sockaddr> lv2_socket_native::accept(bool is_lock)
 {
 	std::unique_lock<shared_mutex> lock(mutex, std::defer_lock);
 
@@ -123,12 +115,12 @@ std::tuple<bool, s32, std::shared_ptr<lv2_socket>, sys_net_sockaddr> lv2_socket_
 		sys_net.error("Calling socket::accept() from a previously connected socket!");
 	}
 
-	socket_type native_socket = ::accept(socket, reinterpret_cast<struct sockaddr*>(&native_addr), &native_addrlen);
+	socket_type client_socket = ::accept(native_socket, reinterpret_cast<struct sockaddr*>(&native_addr), &native_addrlen);
 
-	if (native_socket != invalid_socket)
+	if (client_socket != invalid_socket)
 	{
-		auto newsock = std::make_shared<lv2_socket_native>(family, type, protocol);
-		newsock->set_socket(native_socket, family, type, protocol);
+		auto newsock = make_single<lv2_socket_native>(family, type, protocol);
+		newsock->set_socket(client_socket, family, type, protocol);
 
 		// Sockets inherit non blocking behaviour from their parent
 		newsock->so_nbio = so_nbio;
@@ -181,7 +173,7 @@ s32 lv2_socket_native::bind(const sys_net_sockaddr& addr)
 
 	sys_net.warning("[Native] Trying to bind %s:%d", native_addr.sin_addr, std::bit_cast<be_t<u16>, u16>(native_addr.sin_port));
 
-	if (::bind(socket, reinterpret_cast<struct sockaddr*>(&native_addr), native_addr_len) == 0)
+	if (::bind(native_socket, reinterpret_cast<struct sockaddr*>(&native_addr), native_addr_len) == 0)
 	{
 		// Only UPNP port forward binds to 0.0.0.0
 		if (saddr == 0)
@@ -190,7 +182,7 @@ s32 lv2_socket_native::bind(const sys_net_sockaddr& addr)
 			{
 				sockaddr_in client_addr;
 				socklen_t client_addr_size = sizeof(client_addr);
-				ensure(::getsockname(socket, reinterpret_cast<struct sockaddr*>(&client_addr), &client_addr_size) == 0);
+				ensure(::getsockname(native_socket, reinterpret_cast<struct sockaddr*>(&client_addr), &client_addr_size) == 0);
 				bound_port = std::bit_cast<u16, be_t<u16>>(client_addr.sin_port);
 			}
 			else
@@ -253,7 +245,7 @@ std::optional<s32> lv2_socket_native::connect(const sys_net_sockaddr& addr)
 		return -SYS_NET_EALREADY;
 	}
 
-	if (::connect(socket, reinterpret_cast<struct sockaddr*>(&native_addr), native_addr_len) == 0)
+	if (::connect(native_socket, reinterpret_cast<struct sockaddr*>(&native_addr), native_addr_len) == 0)
 	{
 		return CELL_OK;
 	}
@@ -274,13 +266,13 @@ std::optional<s32> lv2_socket_native::connect(const sys_net_sockaddr& addr)
 #ifdef _WIN32
 			connecting = true;
 #endif
-			this->poll_queue(nullptr, lv2_socket::poll_t::write, [this](bs_t<lv2_socket::poll_t> events) -> bool
+			this->poll_queue(null_ptr, lv2_socket::poll_t::write, [this](bs_t<lv2_socket::poll_t> events) -> bool
 				{
 					if (events & lv2_socket::poll_t::write)
 					{
 						int native_error;
 						::socklen_t size = sizeof(native_error);
-						if (::getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&native_error), &size) != 0 || size != sizeof(int))
+						if (::getsockopt(native_socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&native_error), &size) != 0 || size != sizeof(int))
 						{
 							so_error = 1;
 						}
@@ -312,7 +304,7 @@ s32 lv2_socket_native::connect_followup()
 {
 	int native_error;
 	::socklen_t size = sizeof(native_error);
-	if (::getsockopt(socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&native_error), &size) != 0 || size != sizeof(int))
+	if (::getsockopt(native_socket, SOL_SOCKET, SO_ERROR, reinterpret_cast<char*>(&native_error), &size) != 0 || size != sizeof(int))
 	{
 		return -1;
 	}
@@ -328,7 +320,7 @@ std::pair<s32, sys_net_sockaddr> lv2_socket_native::getpeername()
 	::sockaddr_storage native_addr;
 	::socklen_t native_addrlen = sizeof(native_addr);
 
-	if (::getpeername(socket, reinterpret_cast<struct sockaddr*>(&native_addr), &native_addrlen) == 0)
+	if (::getpeername(native_socket, reinterpret_cast<struct sockaddr*>(&native_addr), &native_addrlen) == 0)
 	{
 		ensure(native_addr.ss_family == AF_INET);
 
@@ -347,7 +339,7 @@ std::pair<s32, sys_net_sockaddr> lv2_socket_native::getsockname()
 	::sockaddr_storage native_addr;
 	::socklen_t native_addrlen = sizeof(native_addr);
 
-	if (::getsockname(socket, reinterpret_cast<struct sockaddr*>(&native_addr), &native_addrlen) == 0)
+	if (::getsockname(native_socket, reinterpret_cast<struct sockaddr*>(&native_addr), &native_addrlen) == 0)
 	{
 		ensure(native_addr.ss_family == AF_INET);
 
@@ -589,7 +581,7 @@ std::tuple<s32, lv2_socket::sockopt_data, u32> lv2_socket_native::getsockopt(s32
 		return {-SYS_NET_EINVAL, {}, {}};
 	}
 
-	if (::getsockopt(socket, native_level, native_opt, native_val.ch, &native_len) != 0)
+	if (::getsockopt(native_socket, native_level, native_opt, native_val.ch, &native_len) != 0)
 	{
 		return {-get_last_error(false), {}, {}};
 	}
@@ -872,7 +864,7 @@ s32 lv2_socket_native::setsockopt(s32 level, s32 optname, const std::vector<u8>&
 		return -SYS_NET_EINVAL;
 	}
 
-	if (::setsockopt(socket, native_level, native_opt, static_cast<const char*>(native_val), native_len) == 0)
+	if (::setsockopt(native_socket, native_level, native_opt, static_cast<const char*>(native_val), native_len) == 0)
 	{
 		return {};
 	}
@@ -884,7 +876,7 @@ s32 lv2_socket_native::listen(s32 backlog)
 {
 	std::lock_guard lock(mutex);
 
-	if (::listen(socket, backlog) == 0)
+	if (::listen(native_socket, backlog) == 0)
 	{
 		return CELL_OK;
 	}
@@ -938,7 +930,7 @@ std::optional<std::tuple<s32, std::vector<u8>, sys_net_sockaddr>> lv2_socket_nat
 		native_flags |= MSG_WAITALL;
 	}
 
-	auto native_result = ::recvfrom(socket, reinterpret_cast<char*>(res_buf.data()), len, native_flags, reinterpret_cast<struct sockaddr*>(&native_addr), &native_addrlen);
+	auto native_result = ::recvfrom(native_socket, reinterpret_cast<char*>(res_buf.data()), len, native_flags, reinterpret_cast<struct sockaddr*>(&native_addr), &native_addrlen);
 
 	if (native_result >= 0)
 	{
@@ -1029,7 +1021,7 @@ std::optional<s32> lv2_socket_native::sendto(s32 flags, const std::vector<u8>& b
 		}
 	}
 
-	native_result = ::sendto(socket, reinterpret_cast<const char*>(buf.data()), ::narrow<int>(buf.size()), native_flags, native_addr ? reinterpret_cast<struct sockaddr*>(&native_addr.value()) : nullptr, native_addr ? sizeof(sockaddr_in) : 0);
+	native_result = ::sendto(native_socket, reinterpret_cast<const char*>(buf.data()), ::narrow<int>(buf.size()), native_flags, native_addr ? reinterpret_cast<struct sockaddr*>(&native_addr.value()) : nullptr, native_addr ? sizeof(sockaddr_in) : 0);
 
 	if (native_result >= 0)
 	{
@@ -1083,7 +1075,7 @@ std::optional<s32> lv2_socket_native::sendmsg(s32 flags, const sys_net_msghdr& m
 		const u32 len = msg.msg_iov[i].iov_len;
 		const std::vector<u8> buf_copy(vm::_ptr<const char>(iov_base.addr()), vm::_ptr<const char>(iov_base.addr()) + len);
 
-		native_result = ::send(socket, reinterpret_cast<const char*>(buf_copy.data()), ::narrow<int>(buf_copy.size()), native_flags);
+		native_result = ::send(native_socket, reinterpret_cast<const char*>(buf_copy.data()), ::narrow<int>(buf_copy.size()), native_flags);
 
 		if (native_result >= 0)
 		{
@@ -1104,20 +1096,16 @@ std::optional<s32> lv2_socket_native::sendmsg(s32 flags, const sys_net_msghdr& m
 void lv2_socket_native::close()
 {
 	std::lock_guard lock(mutex);
-	if (socket)
+
+	np::close_socket(native_socket);
+	native_socket = {};
+
+	if (auto dnshook = g_fxo->try_get<np::dnshook>())
 	{
-#ifdef _WIN32
-		::closesocket(socket);
-#else
-		::close(socket);
-#endif
-		socket = {};
+		dnshook->remove_dns_spy(lv2_id);
 	}
 
-	auto& dnshook = g_fxo->get<np::dnshook>();
-	dnshook.remove_dns_spy(lv2_id);
-
-	if (bound_port)
+	if (bound_port && g_fxo->is_init<named_thread<np::np_handler>>())
 	{
 		auto& nph = g_fxo->get<named_thread<np::np_handler>>();
 		nph.upnp_remove_port_mapping(bound_port, type == SYS_NET_SOCK_STREAM ? "TCP" : "UDP");
@@ -1147,7 +1135,7 @@ s32 lv2_socket_native::shutdown(s32 how)
                                  SHUT_RDWR;
 #endif
 
-	if (::shutdown(socket, native_how) == 0)
+	if (::shutdown(native_socket, native_how) == 0)
 	{
 		return CELL_OK;
 	}
@@ -1169,7 +1157,7 @@ s32 lv2_socket_native::poll(sys_net_pollfd& sn_pfd, pollfd& native_pfd)
 		sys_net.warning("sys_net_bnet_poll(fd=%d): events=0x%x", sn_pfd.fd, sn_pfd.events);
 	}
 
-	native_pfd.fd = socket;
+	native_pfd.fd = native_socket;
 
 	if (sn_pfd.events & SYS_NET_POLLIN)
 	{
@@ -1185,7 +1173,7 @@ s32 lv2_socket_native::poll(sys_net_pollfd& sn_pfd, pollfd& native_pfd)
 
 std::tuple<bool, bool, bool> lv2_socket_native::select(bs_t<lv2_socket::poll_t> selected, pollfd& native_pfd)
 {
-	native_pfd.fd = socket;
+	native_pfd.fd = native_socket;
 	if (selected & lv2_socket::poll_t::read)
 	{
 		native_pfd.events |= POLLIN;
@@ -1202,12 +1190,12 @@ void lv2_socket_native::set_default_buffers()
 {
 	// Those are the default PS3 values
 	u32 default_RCVBUF = (type == SYS_NET_SOCK_STREAM) ? 65535 : 9216;
-	if (::setsockopt(socket, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&default_RCVBUF), sizeof(default_RCVBUF)) != 0)
+	if (::setsockopt(native_socket, SOL_SOCKET, SO_RCVBUF, reinterpret_cast<const char*>(&default_RCVBUF), sizeof(default_RCVBUF)) != 0)
 	{
 		sys_net.error("Error setting default SO_RCVBUF on sys_net_bnet_socket socket");
 	}
 	u32 default_SNDBUF = 131072;
-	if (::setsockopt(socket, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&default_SNDBUF), sizeof(default_SNDBUF)) != 0)
+	if (::setsockopt(native_socket, SOL_SOCKET, SO_SNDBUF, reinterpret_cast<const char*>(&default_SNDBUF), sizeof(default_SNDBUF)) != 0)
 	{
 		sys_net.error("Error setting default SO_SNDBUF on sys_net_bnet_socket socket");
 	}
@@ -1218,12 +1206,7 @@ void lv2_socket_native::set_non_blocking()
 	// Set non-blocking
 	// This is done to avoid having threads stuck on blocking socket functions
 	// Blocking functions just put the thread to sleep and delegate the waking up to network_thread which polls the sockets
-#ifdef _WIN32
-	u_long _true = 1;
-	::ioctlsocket(socket, FIONBIO, &_true);
-#else
-	::fcntl(socket, F_SETFL, ::fcntl(socket, F_GETFL, 0) | O_NONBLOCK);
-#endif
+	np::set_socket_non_blocking(native_socket);
 }
 
 bool lv2_socket_native::is_socket_connected()
@@ -1238,7 +1221,7 @@ bool lv2_socket_native::is_socket_connected()
 	int listening = 0;
 	socklen_t len = sizeof(listening);
 
-	if (::getsockopt(socket, SOL_SOCKET, SO_ACCEPTCONN, reinterpret_cast<char*>(&listening), &len) == -1)
+	if (::getsockopt(native_socket, SOL_SOCKET, SO_ACCEPTCONN, reinterpret_cast<char*>(&listening), &len) == -1)
 	{
 		return false;
 	}
@@ -1254,8 +1237,8 @@ bool lv2_socket_native::is_socket_connected()
 
 	FD_ZERO(&readfds);
 	FD_ZERO(&writefds);
-	FD_SET(socket, &readfds);
-	FD_SET(socket, &writefds);
+	FD_SET(native_socket, &readfds);
+	FD_SET(native_socket, &writefds);
 
 	// Use select to check for readability and writability
 	const int result = ::select(1, &readfds, &writefds, NULL, &timeout);
@@ -1267,5 +1250,5 @@ bool lv2_socket_native::is_socket_connected()
 	}
 
 	// Socket is connected if it's readable or writable
-	return FD_ISSET(socket, &readfds) || FD_ISSET(socket, &writefds);
+	return FD_ISSET(native_socket, &readfds) || FD_ISSET(native_socket, &writefds);
 }

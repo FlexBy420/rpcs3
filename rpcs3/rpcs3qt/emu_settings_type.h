@@ -103,6 +103,7 @@ enum class emu_settings_type
 	DisableMSLFastMath,
 	OutputScalingMode,
 	ForceHwMSAAResolve,
+	DisableAsyncHostMM,
 
 	// Performance Overlay
 	PerfOverlayEnabled,
@@ -177,10 +178,10 @@ enum class emu_settings_type
 	UseNativeInterface,
 	ShowShaderCompilationHint,
 	ShowPPUCompilationHint,
+	ShowAutosaveAutoloadHint,
 	ShowPressureIntensityToggleHint,
 	ShowAnalogLimiterToggleHint,
 	ShowMouseAndKeyboardToggleHint,
-	ShowAutosaveAutoloadHint,
 	WindowTitleFormat,
 	PauseDuringHomeMenu,
 
@@ -199,6 +200,7 @@ enum class emu_settings_type
 	KeyboardType,
 	EnterButtonAssignment,
 	EnableHostRoot,
+	EmptyHdd0Tmp,
 	LimitCacheSize,
 	MaximumCacheSize,
 	ConsoleTimeOffset,
@@ -294,6 +296,7 @@ inline static const std::map<emu_settings_type, cfg_location> settings_location 
 	{ emu_settings_type::DisableMSLFastMath,         { "Video", "Disable MSL Fast Math"}},
 	{ emu_settings_type::OutputScalingMode,          { "Video", "Output Scaling Mode"}},
 	{ emu_settings_type::ForceHwMSAAResolve,         { "Video", "Force Hardware MSAA Resolve"}},
+	{ emu_settings_type::DisableAsyncHostMM,         { "Video", "Disable Asynchronous Memory Manager"}},
 
 	// Vulkan
 	{ emu_settings_type::VulkanAsyncTextureUploads,           { "Video", "Vulkan", "Asynchronous Texture Streaming 2"}},
@@ -374,13 +377,13 @@ inline static const std::map<emu_settings_type, cfg_location> settings_location 
 	{ emu_settings_type::UseNativeInterface,              { "Miscellaneous", "Use native user interface"}},
 	{ emu_settings_type::ShowShaderCompilationHint,       { "Miscellaneous", "Show shader compilation hint"}},
 	{ emu_settings_type::ShowPPUCompilationHint,          { "Miscellaneous", "Show PPU compilation hint"}},
+	{ emu_settings_type::ShowAutosaveAutoloadHint,        { "Miscellaneous", "Show autosave/autoload hint"}},
 	{ emu_settings_type::ShowPressureIntensityToggleHint, { "Miscellaneous", "Show pressure intensity toggle hint"}},
 	{ emu_settings_type::ShowAnalogLimiterToggleHint,     { "Miscellaneous", "Show analog limiter toggle hint"}},
 	{ emu_settings_type::ShowMouseAndKeyboardToggleHint,  { "Miscellaneous", "Show mouse and keyboard toggle hint"}},
 	{ emu_settings_type::SilenceAllLogs,                  { "Miscellaneous", "Silence All Logs" }},
 	{ emu_settings_type::WindowTitleFormat,               { "Miscellaneous", "Window Title Format" }},
 	{ emu_settings_type::PauseDuringHomeMenu,             { "Miscellaneous", "Pause Emulation During Home Menu" }},
-	{ emu_settings_type::ShowAutosaveAutoloadHint,        { "Miscellaneous", "Show autosave/autoload hint" }},
 
 	// Networking
 	{ emu_settings_type::InternetStatus, { "Net", "Internet enabled"}},
@@ -397,6 +400,7 @@ inline static const std::map<emu_settings_type, cfg_location> settings_location 
 	{ emu_settings_type::KeyboardType,          { "System", "Keyboard Type"} },
 	{ emu_settings_type::EnterButtonAssignment, { "System", "Enter button assignment"}},
 	{ emu_settings_type::EnableHostRoot,        { "VFS", "Enable /host_root/"}},
+	{ emu_settings_type::EmptyHdd0Tmp,          { "VFS", "Empty /dev_hdd0/tmp/"}},
 	{ emu_settings_type::LimitCacheSize,        { "VFS", "Limit disk cache size"}},
 	{ emu_settings_type::MaximumCacheSize,      { "VFS", "Disk cache maximum size (MB)"}},
 	{ emu_settings_type::ConsoleTimeOffset,     { "System", "Console time offset (s)"}},

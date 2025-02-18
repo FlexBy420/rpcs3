@@ -1,5 +1,4 @@
 #pragma once
-#include "GLHelpers.h"
 #include "glutils/program.h"
 #include "../Program/ProgramStateCache.h"
 #include "../Common/TextureUtils.h"
@@ -84,6 +83,6 @@ namespace gl
 		void update_fragment_textures(const std::array<std::unique_ptr<rsx::sampled_image_descriptor_base>, 16>& descriptors, u16 reference_mask, u32* out);
 
 		glsl::program* get(const interpreter::program_metadata& fp_metadata);
-		bool is_interpreter(const glsl::program* program);
+		bool is_interpreter(const glsl::program* program) const;
 	};
 }

@@ -33,7 +33,7 @@
 #ifdef _WIN32
 #include "module_verifier.hpp"
 #include "util/dyn_lib.hpp"
-
+#include <shellapi.h>
 
 // TODO(cjj19970505@live.cn)
 // When compiling with WIN32_LEAN_AND_MEAN definition
@@ -61,15 +61,6 @@ DYNAMIC_IMPORT("ntdll.dll", NtSetTimerResolution, NTSTATUS(ULONG DesiredResoluti
 
 #if defined(__APPLE__)
 #include <dispatch/dispatch.h>
-#if defined (__x86_64__)
-// sysinfo_darwin.mm
-namespace Darwin_Version
-{
-	extern int getNSmajorVersion();
-	extern int getNSminorVersion();
-	extern int getNSpatchVersion();
-}
-#endif
 #endif
 
 #include "Utilities/Config.h"
@@ -110,6 +101,66 @@ extern char **environ;
 
 LOG_CHANNEL(sys_log, "SYS");
 LOG_CHANNEL(q_debug, "QDEBUG");
+
+#ifdef _WIN32
+std::set<std::string> get_one_drive_paths()
+{
+	std::set<std::string> paths;
+
+	// NOTE: Disabled. The environment variables can lead to false positives.
+	//for (const char* key : { "OneDrive", "OneDriveConsumer", "OneDriveCommercial" })
+	//{
+	//	if (const char* env_path = std::getenv(key))
+	//	{
+	//		sys_log.notice("get_one_drive_paths: Found OneDrive env path: '%s' (key='%s')", env_path, key);
+	//		paths.insert(env_path);
+	//	}
+	//}
+
+	for (const wchar_t* key : { L"Software\\Microsoft\\OneDrive\\Accounts\\Personal" })
+	{
+		HKEY hkey = NULL;
+		LSTATUS status = RegOpenKeyW(HKEY_CURRENT_USER, key, &hkey);
+		if (status != ERROR_SUCCESS)
+		{
+			sys_log.trace("get_one_drive_paths: RegOpenKeyW failed: %s (key='%s')", fmt::win_error{static_cast<unsigned long>(status), nullptr}, wchar_to_utf8(key));
+			continue;
+		}
+
+		std::wstring path_buffer;
+		DWORD type = 0U;
+
+		do
+		{
+			path_buffer.resize(path_buffer.size() + MAX_PATH);
+			DWORD buffer_size = static_cast<DWORD>(path_buffer.size() - 1);
+			status = RegQueryValueExW(hkey, L"UserFolder", NULL, &type, reinterpret_cast<LPBYTE>(path_buffer.data()), &buffer_size);
+		}
+		while (status == ERROR_MORE_DATA);
+
+		const LSTATUS close_status = RegCloseKey(hkey);
+		if (close_status != ERROR_SUCCESS)
+		{
+			sys_log.error("get_one_drive_paths: RegCloseKey failed: %s", fmt::win_error{static_cast<unsigned long>(close_status), nullptr});
+		}
+
+		if (status != ERROR_SUCCESS)
+		{
+			sys_log.trace("get_one_drive_paths: RegQueryValueExW failed: %s", fmt::win_error{static_cast<unsigned long>(status), nullptr});
+			continue;
+		}
+
+		if ((type == REG_SZ) || (type == REG_EXPAND_SZ) || (type == REG_MULTI_SZ))
+		{
+			const std::string path = wchar_to_utf8(path_buffer.data());
+			sys_log.notice("get_one_drive_paths: Found OneDrive registry path: '%s' (key='%s')", path, wchar_to_utf8(key));
+			paths.insert(path);
+		}
+	}
+
+	return paths;
+}
+#endif
 
 [[noreturn]] extern void report_fatal_error(std::string_view _text, bool is_html = false, bool include_help_text = true)
 {
@@ -510,7 +561,7 @@ int main(int argc, char** argv)
 	}
 
 	const std::string lock_name = fs::get_cache_dir() + "RPCS3.buf";
-	const std::string log_name = fs::get_cache_dir() + "RPCS3.log";
+	const std::string log_name = fs::get_log_dir() + "RPCS3.log";
 
 	static fs::file instance_lock;
 
@@ -558,12 +609,10 @@ int main(int argc, char** argv)
 #endif
 
 #if defined(__APPLE__) && defined(__x86_64__)
-	const int osx_ver_major = Darwin_Version::getNSmajorVersion();
-	const int osx_ver_minor = Darwin_Version::getNSminorVersion();
-	if ((osx_ver_major == 14 && osx_ver_minor < 3) && (utils::get_cpu_brand().rfind("VirtualApple", 0) == 0))
+	if (const utils::OS_version os = utils::get_OS_version();
+		os.version_major == 14 && os.version_minor < 3 && (utils::get_cpu_brand().rfind("VirtualApple", 0) == 0))
 	{
-		const int osx_ver_patch = Darwin_Version::getNSpatchVersion();
-		report_fatal_error(fmt::format("RPCS3 requires macOS 14.3.0 or later.\nYou're currently using macOS %i.%i.%i.\nPlease update macOS from System Settings.\n\n", osx_ver_major, osx_ver_minor, osx_ver_patch));
+		report_fatal_error(fmt::format("RPCS3 requires macOS 14.3.0 or later.\nYou're currently using macOS %i.%i.%i.\nPlease update macOS from System Settings.\n\n", os.version_major, os.version_minor, os.version_patch));
 	}
 #endif
 
@@ -599,12 +648,13 @@ int main(int argc, char** argv)
 
 		// Write OS version
 		logs::stored_message os{sys_log.always()};
-		os.text = utils::get_OS_version();
+		os.text = utils::get_OS_version_string();
 
 		// Write Qt version
 		logs::stored_message qt{(strcmp(QT_VERSION_STR, qVersion()) != 0) ? sys_log.error : sys_log.notice};
 		qt.text = fmt::format("Qt version: Compiled against Qt %s | Run-time uses Qt %s", QT_VERSION_STR, qVersion());
 
+		// Write current time
 		logs::stored_message time{sys_log.always()};
 		time.text = fmt::format("Current Time: %s", std::chrono::system_clock::now());
 
@@ -620,10 +670,26 @@ int main(int argc, char** argv)
 	std::string argument_str;
 	for (int i = 0; i < argc; i++)
 	{
+		if (i > 0) argument_str += " ";
 		argument_str += '\'' + std::string(argv[i]) + '\'';
-		if (i != argc - 1) argument_str += " ";
 	}
+
 	sys_log.notice("argc: %d, argv: %s", argc, argument_str);
+
+#ifdef _WIN32
+	int n_args = 0;
+	if (LPWSTR* arg_list = CommandLineToArgvW(GetCommandLineW(), &n_args))
+	{
+		std::string utf8_args;
+		for (int i = 0; i < n_args; i++)
+		{
+			if (i > 0) utf8_args += " ";
+			utf8_args += '\'' + wchar_to_utf8(arg_list[i]) + '\'';
+		}
+		LocalFree(arg_list);
+		sys_log.notice("argv_utf8: %s", utf8_args);
+	}
+#endif
 
 	// Before we proceed, run some sanity checks
 	run_platform_sanity_checks();
@@ -1119,6 +1185,21 @@ int main(int argc, char** argv)
 				return 1;
 			}
 		}
+
+#ifdef _WIN32
+		// Check OneDrive locations
+		for (const std::string& one_drive_path : get_one_drive_paths())
+		{
+			if (Emu.IsPathInsideDir(emu_dir, one_drive_path))
+			{
+				report_fatal_error(QObject::tr(
+					"RPCS3 should never be run from a OneDrive path!\n"
+					"Please move RPCS3 to a location not synced by OneDrive.\n"
+					"Current location:\n%0").arg(QString::fromStdString(emu_dir)).toStdString());
+				return 1;
+			}
+		}
+#endif
 	}
 
 // Set timerslack value for Linux. The default value is 50,000ns. Change this to just 1 since we value precise timers.

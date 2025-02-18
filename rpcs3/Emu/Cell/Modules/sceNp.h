@@ -1,7 +1,9 @@
 #pragma once
 
+#include "Emu/NP/rpcn_types.h"
 #include "cellRtc.h"
 #include "Emu/Cell/ErrorCodes.h"
+#include "util/shared_ptr.hpp"
 
 #include <set>
 
@@ -1825,7 +1827,7 @@ public:
 	virtual ~SendMessageDialogBase() = default;
 
 	virtual error_code Exec(message_data& msg_data, std::set<std::string>& npids) = 0;
-	virtual void callback_handler(u16 ntype, const std::string& username, bool status) = 0;
+	virtual void callback_handler(rpcn::NotificationType ntype, const std::string& username, bool status) = 0;
 
 protected:
 	std::shared_ptr<rpcn::rpcn_client> m_rpcn;
@@ -1837,7 +1839,7 @@ public:
 	virtual ~RecvMessageDialogBase() = default;
 
 	virtual error_code Exec(SceNpBasicMessageMainType type, SceNpBasicMessageRecvOptions options, SceNpBasicMessageRecvAction& recv_result, u64& chosen_msg_id) = 0;
-	virtual void callback_handler(const std::shared_ptr<std::pair<std::string, message_data>> new_msg, u64 msg_id) = 0;
+	virtual void callback_handler(const shared_ptr<std::pair<std::string, message_data>> new_msg, u64 msg_id) = 0;
 
 protected:
 	std::shared_ptr<rpcn::rpcn_client> m_rpcn;

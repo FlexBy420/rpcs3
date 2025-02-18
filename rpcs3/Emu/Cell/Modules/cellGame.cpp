@@ -6,6 +6,7 @@
 #include "Emu/IdManager.h"
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/PPUModule.h"
+#include "Emu/Cell/timers.hpp"
 #include "Emu/Cell/lv2/sys_fs.h"
 #include "Emu/Cell/lv2/sys_sync.h"
 
@@ -961,7 +962,7 @@ error_code cellGameContentPermit(ppu_thread& ppu, vm::ptr<char[CELL_GAME_PATH_MA
 
 	if (!perm.temp.empty())
 	{
-		std::vector<std::shared_ptr<lv2_file>> lv2_files;
+		std::vector<shared_ptr<lv2_file>> lv2_files;
 
 		const std::string real_dir = vfs::get(dir) + "/";
 

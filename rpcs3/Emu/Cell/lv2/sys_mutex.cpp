@@ -1,7 +1,6 @@
 #include "stdafx.h"
 
 #include "Emu/IdManager.h"
-#include "Emu/IPC.h"
 
 #include "Emu/Cell/ErrorCodes.h"
 #include "Emu/Cell/PPUThread.h"
@@ -25,10 +24,9 @@ lv2_mutex::lv2_mutex(utils::serial& ar)
 	control.raw().owner >>= 1;
 }
 
-std::shared_ptr<void> lv2_mutex::load(utils::serial& ar)
+std::function<void(void*)> lv2_mutex::load(utils::serial& ar)
 {
-	auto mtx = std::make_shared<lv2_mutex>(ar);
-	return lv2_obj::load(mtx->key, mtx);
+	return load_func(make_shared<lv2_mutex>(stx::exact_t<utils::serial&>(ar)));
 }
 
 void lv2_mutex::save(utils::serial& ar)
@@ -88,7 +86,7 @@ error_code sys_mutex_create(ppu_thread& ppu, vm::ptr<u32> mutex_id, vm::ptr<sys_
 
 	if (auto error = lv2_obj::create<lv2_mutex>(_attr.pshared, _attr.ipc_key, _attr.flags, [&]()
 	{
-		return std::make_shared<lv2_mutex>(
+		return make_shared<lv2_mutex>(
 			_attr.protocol,
 			_attr.recursive,
 			_attr.adaptive,

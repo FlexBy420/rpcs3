@@ -11,15 +11,15 @@ PR_NUMBER="$SYSTEM_PULLREQUEST_PULLREQUESTID"
 QT_HOST="http://qt.mirror.constant.com/"
 QT_URL_VER=$(echo "$QT_VER" | sed "s/\.//g")
 QT_VER_MSVC_UP=$(echo "${QT_VER_MSVC}" | tr '[:lower:]' '[:upper:]')
-QT_PREFIX="online/qtsdkrepository/windows_x86/desktop/qt${QT_VER_MAIN}_${QT_URL_VER}/qt.qt${QT_VER_MAIN}.${QT_URL_VER}."
+QT_PREFIX="online/qtsdkrepository/windows_x86/desktop/qt${QT_VER_MAIN}_${QT_URL_VER}/qt${QT_VER_MAIN}_${QT_URL_VER}/qt.qt${QT_VER_MAIN}.${QT_URL_VER}."
 QT_PREFIX_2="win64_${QT_VER_MSVC}_64/${QT_VER}-0-${QT_DATE}"
-QT_SUFFIX="-Windows-Windows_10_22H2-${QT_VER_MSVC_UP}-Windows-Windows_10_22H2-X86_64.7z"
+QT_SUFFIX="-Windows-Windows_11_23H2-${QT_VER_MSVC_UP}-Windows-Windows_11_23H2-X86_64.7z"
 QT_BASE_URL="${QT_HOST}${QT_PREFIX}${QT_PREFIX_2}qtbase${QT_SUFFIX}"
 QT_DECL_URL="${QT_HOST}${QT_PREFIX}${QT_PREFIX_2}qtdeclarative${QT_SUFFIX}"
 QT_TOOL_URL="${QT_HOST}${QT_PREFIX}${QT_PREFIX_2}qttools${QT_SUFFIX}"
 QT_MM_URL="${QT_HOST}${QT_PREFIX}addons.qtmultimedia.${QT_PREFIX_2}qtmultimedia${QT_SUFFIX}"
 QT_SVG_URL="${QT_HOST}${QT_PREFIX}${QT_PREFIX_2}qtsvg${QT_SUFFIX}"
-LLVMLIBS_URL='https://github.com/RPCS3/llvm-mirror/releases/download/custom-build-win-16.0.1/llvmlibs_mt.7z'
+LLVMLIBS_URL='https://github.com/RPCS3/llvm-mirror/releases/download/custom-build-win-19.1.7/llvmlibs_mt.7z'
 GLSLANG_URL='https://github.com/RPCS3/glslang/releases/latest/download/glslanglibs_mt.7z'
 VULKAN_SDK_URL="https://www.dropbox.com/scl/fi/sjjh0fc4ld281pjbl2xzu/VulkanSDK-1.3.268.0-Installer.exe?rlkey=f6wzc0lvms5vwkt2z3qabfv9d&dl=1"
 
@@ -77,7 +77,7 @@ for url in $DEP_URLS; do
 
     # shellcheck disable=SC1003
     case "$url" in
-    *qt*) checksum=$(curl -fL "${url}.sha1"); algo="sha1"; outDir='C:\Qt\' ;;
+    *qt*) checksum=$(curl -fL "${url}.sha1"); algo="sha1"; outDir="$QTDIR/" ;;
     *llvm*) checksum=$(curl -fL "${url}.sha256"); algo="sha256"; outDir="./build/lib_ext/Release-x64" ;;
     *glslang*) checksum=$(curl -fL "${url}.sha256"); algo="sha256"; outDir="./build/lib_ext/Release-x64" ;;
     *Vulkan*)
@@ -103,16 +103,24 @@ COMM_HASH=$(git rev-parse --short=8 HEAD)
 # Format the above into filenames
 if [ -n "$PR_NUMBER" ]; then
     AVVER="${COMM_TAG}-${COMM_HASH}"
-    BUILD="rpcs3-v${AVVER}_win64.7z"
+    BUILD_RAW="rpcs3-v${AVVER}_win64"
+    BUILD="${BUILD_RAW}.7z"
 else
     AVVER="${COMM_TAG}-${COMM_COUNT}"
-    BUILD="rpcs3-v${AVVER}-${COMM_HASH}_win64.7z"
+    BUILD_RAW="rpcs3-v${AVVER}-${COMM_HASH}_win64"
+    BUILD="${BUILD_RAW}.7z"
 fi
 
 # BRANCH is used for experimental build warnings for pr builds, used in main_window.cpp.
 # BUILD is the name of the release artifact
+# BUILD_RAW is just filename
 # AVVER is used for GitHub releases, it is the version number.
 BRANCH="${REPO_NAME}/${REPO_BRANCH}"
-echo "BRANCH=$BRANCH" > .ci/ci-vars.env
-echo "BUILD=$BUILD" >> .ci/ci-vars.env
-echo "AVVER=$AVVER" >> .ci/ci-vars.env
+
+# SC2129
+{
+    echo "BRANCH=$BRANCH"
+    echo "BUILD=$BUILD"
+    echo "BUILD_RAW=$BUILD_RAW"
+    echo "AVVER=$AVVER"
+} >> .ci/ci-vars.env

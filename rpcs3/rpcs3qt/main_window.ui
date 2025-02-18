@@ -67,7 +67,7 @@
      </font>
     </property>
     <property name="focusPolicy">
-     <enum>Qt::ClickFocus</enum>
+     <enum>Qt::FocusPolicy::ClickFocus</enum>
     </property>
     <property name="frame">
      <bool>false</bool>
@@ -119,16 +119,16 @@
         </sizepolicy>
        </property>
        <property name="focusPolicy">
-        <enum>Qt::ClickFocus</enum>
+        <enum>Qt::FocusPolicy::ClickFocus</enum>
        </property>
        <property name="autoFillBackground">
         <bool>false</bool>
        </property>
        <property name="orientation">
-        <enum>Qt::Horizontal</enum>
+        <enum>Qt::Orientation::Horizontal</enum>
        </property>
        <property name="tickPosition">
-        <enum>QSlider::NoTicks</enum>
+        <enum>QSlider::TickPosition::NoTicks</enum>
        </property>
       </widget>
      </item>
@@ -145,7 +145,7 @@
     </rect>
    </property>
    <property name="contextMenuPolicy">
-    <enum>Qt::PreventContextMenu</enum>
+    <enum>Qt::ContextMenuPolicy::PreventContextMenu</enum>
    </property>
    <widget class="QMenu" name="menuFile">
     <property name="title">
@@ -165,9 +165,6 @@
      <addaction name="bootTestAct"/>
     </widget>
     <widget class="QMenu" name="bootRecentMenu">
-     <property name="enabled">
-      <bool>true</bool>
-     </property>
      <property name="title">
       <string>Boot Recent</string>
      </property>
@@ -202,10 +199,22 @@
      <addaction name="createFirmwareCacheAct"/>
      <addaction name="removeFirmwareCacheAct"/>
     </widget>
+    <widget class="QMenu" name="bootRecentSavestatesMenu">
+     <property name="title">
+      <string>Boot Recent Savestate</string>
+     </property>
+     <property name="toolTipsVisible">
+      <bool>true</bool>
+     </property>
+     <addaction name="clearRecentSavestatesAct"/>
+     <addaction name="freezeRecentSavestatesAct"/>
+     <addaction name="separator"/>
+    </widget>
     <addaction name="bootGameAct"/>
     <addaction name="bootVSHAct"/>
     <addaction name="bootElfMenu"/>
     <addaction name="bootSavestateAct"/>
+    <addaction name="bootRecentSavestatesMenu"/>
     <addaction name="bootRecentMenu"/>
     <addaction name="separator"/>
     <addaction name="addGamesAct"/>
@@ -244,6 +253,7 @@
      <addaction name="confUSIOAct"/>
      <addaction name="confPSMoveAct"/>
      <addaction name="confPSMoveDS3Act"/>
+     <addaction name="confPSMoveMouseAct"/>
      <addaction name="confGunCon3Act"/>
      <addaction name="confTopShotEliteAct"/>
      <addaction name="confTopShotFearmasterAct"/>
@@ -287,6 +297,7 @@
     <addaction name="confSavedataManagerAct"/>
     <addaction name="actionManage_RAP_Licenses"/>
     <addaction name="actionManage_Trophy_Data"/>
+    <addaction name="actionManage_Savestates"/>
     <addaction name="actionManage_Skylanders_Portal"/>
     <addaction name="actionManage_Infinity_Base"/>
     <addaction name="actionManage_Dimensions_ToyPad"/>
@@ -355,6 +366,7 @@
      <addaction name="showCatHomeAct"/>
      <addaction name="showCatAudioVideoAct"/>
      <addaction name="showCatGameDataAct"/>
+     <addaction name="showCatOSAct"/>
      <addaction name="showCatUnknownAct"/>
      <addaction name="showCatOtherAct"/>
     </widget>
@@ -411,7 +423,7 @@
     </sizepolicy>
    </property>
    <property name="contextMenuPolicy">
-    <enum>Qt::PreventContextMenu</enum>
+    <enum>Qt::ContextMenuPolicy::PreventContextMenu</enum>
    </property>
    <property name="windowTitle">
     <string>Show tool bar</string>
@@ -420,7 +432,7 @@
     <bool>false</bool>
    </property>
    <property name="allowedAreas">
-    <set>Qt::TopToolBarArea</set>
+    <set>Qt::ToolBarArea::TopToolBarArea</set>
    </property>
    <property name="iconSize">
     <size>
@@ -429,7 +441,7 @@
     </size>
    </property>
    <property name="toolButtonStyle">
-    <enum>Qt::ToolButtonTextUnderIcon</enum>
+    <enum>Qt::ToolButtonStyle::ToolButtonTextUnderIcon</enum>
    </property>
    <property name="floatable">
     <bool>false</bool>
@@ -883,18 +895,12 @@
    <property name="checkable">
     <bool>true</bool>
    </property>
-   <property name="checked">
-    <bool>true</bool>
-   </property>
    <property name="text">
     <string>HDD Games</string>
    </property>
   </action>
   <action name="showCatDiscGameAct">
    <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="checked">
     <bool>true</bool>
    </property>
    <property name="text">
@@ -905,18 +911,12 @@
    <property name="checkable">
     <bool>true</bool>
    </property>
-   <property name="checked">
-    <bool>true</bool>
-   </property>
    <property name="text">
     <string>PS1 Games</string>
    </property>
   </action>
   <action name="showCatPS2GamesAct">
    <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="checked">
     <bool>true</bool>
    </property>
    <property name="text">
@@ -927,18 +927,12 @@
    <property name="checkable">
     <bool>true</bool>
    </property>
-   <property name="checked">
-    <bool>true</bool>
-   </property>
    <property name="text">
     <string>PSP Games</string>
    </property>
   </action>
   <action name="showCatHomeAct">
    <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="checked">
     <bool>true</bool>
    </property>
    <property name="text">
@@ -949,9 +943,6 @@
    <property name="checkable">
     <bool>true</bool>
    </property>
-   <property name="checked">
-    <bool>true</bool>
-   </property>
    <property name="text">
     <string>Audio/Video</string>
    </property>
@@ -960,18 +951,12 @@
    <property name="checkable">
     <bool>true</bool>
    </property>
-   <property name="checked">
-    <bool>true</bool>
-   </property>
    <property name="text">
     <string>Game Data</string>
    </property>
   </action>
   <action name="showCatUnknownAct">
    <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="checked">
     <bool>true</bool>
    </property>
    <property name="text">
@@ -1088,9 +1073,6 @@
   </action>
   <action name="showCatOtherAct">
    <property name="checkable">
-    <bool>true</bool>
-   </property>
-   <property name="checked">
     <bool>true</bool>
    </property>
    <property name="text">
@@ -1362,6 +1344,11 @@
     <string>PS Move (Fake)</string>
    </property>
   </action>
+  <action name="confPSMoveMouseAct">
+   <property name="text">
+    <string>PS Move (Mouse)</string>
+   </property>
+  </action>
   <action name="confGunCon3Act">
    <property name="text">
     <string>GunCon 3</string>
@@ -1400,6 +1387,32 @@
   <action name="confPSMoveAct">
    <property name="text">
     <string>PS Move</string>
+   </property>
+  </action>
+  <action name="showCatOSAct">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Operating System</string>
+   </property>
+  </action>
+  <action name="clearRecentSavestatesAct">
+   <property name="text">
+    <string>List Clear</string>
+   </property>
+  </action>
+  <action name="freezeRecentSavestatesAct">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>List Freeze</string>
+   </property>
+  </action>
+  <action name="actionManage_Savestates">
+   <property name="text">
+    <string>Savestates</string>
    </property>
   </action>
  </widget>

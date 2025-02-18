@@ -1,6 +1,5 @@
 #include "stdafx.h"
 #include "overlay_home_menu_settings.h"
-#include "overlay_home_menu_components.h"
 #include "Emu/system_config.h"
 
 namespace rsx
@@ -83,6 +82,8 @@ namespace rsx
 
 			add_dropdown(&g_cfg.io.pad_mode, localized_string_id::HOME_MENU_SETTINGS_INPUT_PAD_MODE);
 			add_unsigned_slider(&g_cfg.io.pad_sleep, localized_string_id::HOME_MENU_SETTINGS_INPUT_PAD_SLEEP, " µs", 100);
+			add_unsigned_slider(&g_cfg.io.fake_move_rotation_cone_h, localized_string_id::HOME_MENU_SETTINGS_INPUT_FAKE_MOVE_ROTATION_CONE_H, "°", 1);
+			add_unsigned_slider(&g_cfg.io.fake_move_rotation_cone_v, localized_string_id::HOME_MENU_SETTINGS_INPUT_FAKE_MOVE_ROTATION_CONE_V, "°", 1);
 
 			apply_layout();
 		}

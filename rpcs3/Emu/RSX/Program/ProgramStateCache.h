@@ -6,6 +6,7 @@
 #include "Utilities/mutex.h"
 #include "util/logs.hpp"
 #include "util/fnv_hash.hpp"
+#include "util/v128.hpp"
 
 #include <span>
 #include <unordered_map>
@@ -61,7 +62,8 @@ namespace program_hash_util
 		/**
 		* returns true if the given source Operand is a constant
 		*/
-		static bool is_constant(u32 sourceOperand);
+
+		static bool is_any_src_constant(v128 sourceOperand);
 
 		static usz get_fragment_program_ucode_size(const void* ptr);
 
@@ -293,10 +295,10 @@ public:
 		bool compile_async,
 		bool allow_notification,
 		Args&& ...args
-		)
+	)
 	{
-		const auto &vp_search = search_vertex_program(vertexShader);
-		const auto &fp_search = search_fragment_program(fragmentShader);
+		const auto& vp_search = search_vertex_program(vertexShader);
+		const auto& fp_search = search_fragment_program(fragmentShader);
 
 		const bool already_existing_fragment_program = std::get<1>(fp_search);
 		const bool already_existing_vertex_program = std::get<1>(vp_search);
@@ -385,7 +387,13 @@ public:
 
 	void fill_fragment_constants_buffer(std::span<f32> dst_buffer, const fragment_program_type& fragment_program, const RSXFragmentProgram& rsx_prog, bool sanitize = false) const
 	{
-		ensure((dst_buffer.size_bytes() >= ::narrow<int>(fragment_program.FragmentConstantOffsetCache.size()) * 16u));
+		if (dst_buffer.size_bytes() < (fragment_program.FragmentConstantOffsetCache.size() * 16))
+		{
+			// This can happen if CELL alters the shader after it has been loaded by RSX.
+			rsx_log.error("Insufficient constants buffer size passed to fragment program! Corrupt shader?");
+			return;
+		}
+
 		rsx::write_fragment_constants_to_buffer(dst_buffer, rsx_prog, fragment_program.FragmentConstantOffsetCache, sanitize);
 	}
 

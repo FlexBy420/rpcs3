@@ -1,10 +1,8 @@
 #include "stdafx.h"
 #include "ps_move_handler.h"
+#include "ps_move_calibration.h"
 #include "Emu/Io/pad_config.h"
-#include "Emu/System.h"
-#include "Emu/system_config.h"
 #include "Emu/Cell/Modules/cellGem.h"
-#include "Input/ps_move_config.h"
 
 LOG_CHANNEL(move_log, "Move");
 
@@ -56,11 +54,6 @@ namespace
 		charge_full  = 0x05,
 		usb_charging = 0xEE,
 		usb_charged  = 0xEF,
-	};
-
-	enum
-	{
-		zero_shift = 0x8000,
 	};
 }
 
@@ -131,6 +124,7 @@ ps_move_handler::ps_move_handler()
 	b_has_battery = true;
 	b_has_battery_led = false;
 	b_has_pressure_intensity_button = false;
+	b_has_orientation = true;
 
 	m_name_string = "PS Move #";
 	m_max_devices = 4; // CELL_GEM_MAX_NUM
@@ -173,6 +167,8 @@ void ps_move_handler::init_config(cfg_pad* cfg)
 	cfg->l1.def       = ::at32(button_list, ps_move_key_codes::none);
 	cfg->l2.def       = ::at32(button_list, ps_move_key_codes::none);
 	cfg->l3.def       = ::at32(button_list, ps_move_key_codes::none);
+
+	cfg->orientation_reset_button.def = ::at32(button_list, ps_move_key_codes::none);
 
 	// Set default misc variables
 	cfg->lstickdeadzone.def    = 40; // between 0 and 255
@@ -223,7 +219,7 @@ hid_device* ps_move_handler::connect_move_device(ps_move_device* device, std::st
 
 	if (hid_set_nonblocking(device->bt_device, 1) == -1)
 	{
-		move_log.error("check_add_device: hid_set_nonblocking failed! Reason: %s", hid_error(device->bt_device));
+		move_log.error("connect_move_device: hid_set_nonblocking failed! Reason: %s", hid_error(device->bt_device));
 		device->close();
 		return nullptr;
 	}
@@ -239,7 +235,7 @@ hid_device* ps_move_handler::connect_move_device(ps_move_device* device, std::st
 
 	if (hid_set_nonblocking(device->hidDevice, 1) == -1)
 	{
-		move_log.error("check_add_device: hid_set_nonblocking failed! Reason: %s", hid_error(device->hidDevice));
+		move_log.error("connect_move_device: hid_set_nonblocking failed! Reason: %s", hid_error(device->hidDevice));
 		device->close();
 		return nullptr;
 	}
@@ -314,6 +310,54 @@ void ps_move_handler::check_add_device(hid_device* hidDevice, std::string_view p
 
 	device->hidDevice = hidDevice;
 	device->path = path;
+
+	// Get calibration
+	device->calibration.is_valid = true;
+
+	ps_move_calibration_blob calibration {};
+
+	for (int i = 0; i < 2; i++)
+	{
+		std::array<u8, PSMOVE_CALIBRATION_SIZE> cal {};
+		cal[0] = 0x10;
+		const int res = hid_get_feature_report(device->hidDevice, cal.data(), cal.size());
+		if (res < 0)
+		{
+			move_log.error("connect_move_device: hid_get_feature_report 0x10 (calibration) failed! result=%d, error=%s", res, hid_error(device->hidDevice));
+			device->calibration.is_valid = false;
+			break;
+		}
+
+		int src_offset = 0;
+		int dest_offset = 0;
+
+		if ((cal[1] == 0x01 && device->model == ps_move_model::ZCM1) ||
+			(cal[1] == 0x81 && device->model == ps_move_model::ZCM2))
+		{
+			// This is the second block
+			dest_offset = PSMOVE_CALIBRATION_SIZE;
+			src_offset = 2;
+		}
+		else if (cal[1] == 0x82 && device->model == ps_move_model::ZCM1)
+		{
+			// This is the third block
+			dest_offset = 2 * PSMOVE_CALIBRATION_SIZE - 2;
+			src_offset = 2;
+		}
+		else if (cal[1] != 0x00) // Check if this is the first block (offsets stay 0)
+		{
+			move_log.error("connect_move_device: Failed to read calibration: cal=0x%x'", cal[1]);
+			device->calibration.is_valid = false;
+			break;
+		}
+
+		std::memcpy(&calibration.data[dest_offset], &cal[src_offset], cal.size() - src_offset);
+	}
+
+	if (device->calibration.is_valid)
+	{
+		psmove_parse_calibration(calibration, *device);
+	}
 
 	// Activate
 	if (send_output_report(device) == -1)
@@ -620,40 +664,78 @@ void ps_move_handler::get_extended_info(const pad_ensemble& binding)
 
 	const ps_move_input_report_common& input = dev->input_report_common();
 
-	constexpr f32 MOVE_ONE_G = 4096.0f; // This is just a rough estimate and probably depends on the device
-
 	// The default position is flat on the ground, pointing forward.
 	// The accelerometers constantly measure G forces.
 	// The gyros measure changes in orientation and will reset when the device isn't moved anymore.
-	s16 accel_x = input.accel_x_2; // Increases if the device is rolled to the left
-	s16 accel_y = input.accel_y_2; // Increases if the device is pitched upwards
-	s16 accel_z = input.accel_z_2; // Increases if the device is moved upwards
-	s16 gyro_x = input.gyro_x_2;   // Increases if the device is pitched upwards
-	s16 gyro_y = input.gyro_y_2;   // Increases if the device is rolled to the right
-	s16 gyro_z = input.gyro_z_2;   // Increases if the device is yawed to the left
+	f32 accel_x = input.accel_x_1; // Increases if the device is rolled to the left
+	f32 accel_y = input.accel_y_1; // Increases if the device is pitched upwards
+	f32 accel_z = input.accel_z_1; // Increases if the device is moved upwards
+	f32 gyro_x = input.gyro_x_1;   // Increases if the device is pitched upwards
+	f32 gyro_y = input.gyro_y_1;   // Increases if the device is rolled to the right
+	f32 gyro_z = input.gyro_z_1;   // Increases if the device is yawed to the left
 
 	if (dev->model == ps_move_model::ZCM1)
 	{
-		accel_x -= zero_shift;
-		accel_y -= zero_shift;
-		accel_z -= zero_shift;
-		gyro_x -= zero_shift;
-		gyro_y -= zero_shift;
-		gyro_z -= zero_shift;
+		accel_x -= static_cast<f32>(zero_shift);
+		accel_y -= static_cast<f32>(zero_shift);
+		accel_z -= static_cast<f32>(zero_shift);
+		gyro_x -= static_cast<f32>(zero_shift);
+		gyro_y -= static_cast<f32>(zero_shift);
+		gyro_z -= static_cast<f32>(zero_shift);
 	}
 
-	pad->m_sensors[0].m_value = Clamp0To1023(512.0f + (MOTION_ONE_G * (accel_x / MOVE_ONE_G) * -1.0f));
-	pad->m_sensors[1].m_value = Clamp0To1023(512.0f + (MOTION_ONE_G * (accel_z / MOVE_ONE_G) * -1.0f));
-	pad->m_sensors[2].m_value = Clamp0To1023(512.0f + (MOTION_ONE_G * (accel_y / MOVE_ONE_G)));
-	pad->m_sensors[3].m_value = Clamp0To1023(512.0f + (MOTION_ONE_G * (gyro_z / MOVE_ONE_G) * -1.0f));
+	if (!device->config || !device->config->orientation_enabled)
+	{
+		pad->move_data.reset_sensors();
+	}
+	else
+	{
+		// Apply calibration
+		if (dev->calibration.is_valid)
+		{
+			accel_x = accel_x * dev->calibration.accel_x_factor + dev->calibration.accel_x_offset;
+			accel_y = accel_y * dev->calibration.accel_y_factor + dev->calibration.accel_y_offset;
+			accel_z = accel_z * dev->calibration.accel_z_factor + dev->calibration.accel_z_offset;
+			gyro_x = (gyro_x - dev->calibration.gyro_x_offset) * dev->calibration.gyro_x_gain;
+			gyro_y = (gyro_y - dev->calibration.gyro_y_offset) * dev->calibration.gyro_y_gain;
+			gyro_z = (gyro_z - dev->calibration.gyro_z_offset) * dev->calibration.gyro_z_gain;
+		}
+		else
+		{
+			constexpr f32 MOVE_ONE_G = 4096.0f; // This is just a rough estimate and probably depends on the device
 
-	pad->move_data.accelerometer_x = accel_x;
-	pad->move_data.accelerometer_y = accel_y;
-	pad->move_data.accelerometer_z = accel_z;
-	pad->move_data.gyro_x = gyro_x;
-	pad->move_data.gyro_y = gyro_y;
-	pad->move_data.gyro_z = gyro_z;
+			accel_x /= MOVE_ONE_G;
+			accel_y /= MOVE_ONE_G;
+			accel_z /= MOVE_ONE_G;
+			gyro_x /= MOVE_ONE_G;
+			gyro_y /= MOVE_ONE_G;
+			gyro_z /= MOVE_ONE_G;
+		}
+
+		pad->move_data.accelerometer_x = accel_x;
+		pad->move_data.accelerometer_y = accel_y;
+		pad->move_data.accelerometer_z = accel_z;
+		pad->move_data.gyro_x = gyro_x;
+		pad->move_data.gyro_y = gyro_y;
+		pad->move_data.gyro_z = gyro_z;
+
+		if (dev->model == ps_move_model::ZCM1)
+		{
+			const ps_move_input_report_ZCM1& input_zcm1 = dev->input_report_ZCM1;
+
+			#define TWELVE_BIT_SIGNED(x) (((x) & 0x800) ? (-(((~(x)) & 0xFFF) + 1)) : (x))
+			pad->move_data.magnetometer_x = static_cast<f32>(TWELVE_BIT_SIGNED(((input.magnetometer_x & 0x0F) << 8) | input_zcm1.magnetometer_x2));
+			pad->move_data.magnetometer_y = static_cast<f32>(TWELVE_BIT_SIGNED((input_zcm1.magnetometer_y << 4) | (input_zcm1.magnetometer_yz & 0xF0) >> 4));
+			pad->move_data.magnetometer_z = static_cast<f32>(TWELVE_BIT_SIGNED(((input_zcm1.magnetometer_yz & 0x0F) << 8) | input_zcm1.magnetometer_z));
+		}
+	}
+
 	pad->move_data.temperature = ((input.temperature << 4) | ((input.magnetometer_x & 0xF0) >> 4));
+
+	pad->m_sensors[0].m_value = Clamp0To1023(512.0f + (MOTION_ONE_G * accel_x * -1.0f));
+	pad->m_sensors[1].m_value = Clamp0To1023(512.0f + (MOTION_ONE_G * accel_y * -1.0f));
+	pad->m_sensors[2].m_value = Clamp0To1023(512.0f + (MOTION_ONE_G * accel_z));
+	pad->m_sensors[3].m_value = Clamp0To1023(512.0f + (MOTION_ONE_G * gyro_z * -1.0f));
 
 	handle_external_device(binding);
 }
@@ -700,11 +782,9 @@ int ps_move_handler::send_output_report(ps_move_device* device)
 	const auto elapsed = now - device->last_output_report_time;
 
 	// Update LED at an interval or it will be disabled automatically
-	if (elapsed >= 4000ms)
-	{
-		device->new_output_data = true;
-	}
-	else
+	device->new_output_data |= elapsed >= 4000ms;
+
+	if (!device->new_output_data)
 	{
 		// Use LED update rate of 120ms
 		if (elapsed < 120ms)
@@ -737,10 +817,9 @@ void ps_move_handler::apply_pad_data(const pad_ensemble& binding)
 
 	cfg_pad* config = dev->config;
 
-	const int idx_l = config->switch_vibration_motors ? 1 : 0;
+	const u8 speed_large = config->get_large_motor_speed(pad->m_vibrateMotors);
 
-	const u8 speed_large = config->enable_vibration_motor_large ? pad->m_vibrateMotors[idx_l].m_value : 0;
-
+	dev->new_output_data |= dev->large_motor != speed_large;
 	dev->large_motor = speed_large;
 
 	if (send_output_report(dev) >= 0)

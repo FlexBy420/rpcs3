@@ -475,7 +475,7 @@ namespace fs
 		dir() = default;
 
 		// Open dir handle
-		explicit dir(const std::string& path)
+		explicit dir(const std::string& path) noexcept
 		{
 			open(path);
 		}
@@ -484,7 +484,7 @@ namespace fs
 		bool open(const std::string& path);
 
 		// Check whether the handle is valid (opened directory)
-		explicit operator bool() const
+		explicit operator bool() const noexcept
 		{
 			return m_dir.operator bool();
 		}
@@ -531,7 +531,7 @@ namespace fs
 				from_current
 			};
 
-			iterator(const dir* parent, mode mode_ = mode::from_first)
+			iterator(const dir* parent, mode mode_ = mode::from_first) noexcept
 				: m_parent(parent)
 			{
 				if (!m_parent)
@@ -569,6 +569,13 @@ namespace fs
 				return *this;
 			}
 
+			iterator operator++(int)
+			{
+				iterator old = *this;
+				*this = {m_parent, mode::from_current};
+				return old;
+			}
+
 			bool operator !=(const iterator& rhs) const
 			{
 				return m_parent != rhs.m_parent;
@@ -592,11 +599,14 @@ namespace fs
 	// Get executable containing directory
 	std::string get_executable_dir();
 
-	// Get configuration directory
-	const std::string& get_config_dir();
+	// Get configuration directory. Set get_config_subdirectory to true to get the nested config dir on windows.
+	const std::string& get_config_dir(bool get_config_subdirectory = false);
 
 	// Get common cache directory
 	const std::string& get_cache_dir();
+
+	// Get common log directory
+	const std::string& get_log_dir();
 
 	// Temporary directory
 	const std::string& get_temp_dir();

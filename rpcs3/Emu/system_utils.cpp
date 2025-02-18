@@ -6,7 +6,6 @@
 #include "Emu/System.h"
 #include "util/sysinfo.hpp"
 #include "Utilities/File.h"
-#include "Utilities/StrUtil.h"
 #include "Utilities/Thread.h"
 #include "Crypto/unpkg.h"
 #include "Crypto/unself.h"
@@ -311,11 +310,7 @@ namespace rpcs3::utils
 
 	std::string get_custom_config_dir()
 	{
-#ifdef _WIN32
-		return fs::get_config_dir() + "config/custom_configs/";
-#else
-		return fs::get_config_dir() + "custom_configs/";
-#endif
+		return fs::get_config_dir(true) + "custom_configs/";
 	}
 
 	std::string get_custom_config_path(const std::string& identifier)
@@ -330,11 +325,7 @@ namespace rpcs3::utils
 
 	std::string get_input_config_root()
 	{
-#ifdef _WIN32
-		return fs::get_config_dir() + "config/input_configs/";
-#else
-		return fs::get_config_dir() + "input_configs/";
-#endif
+		return fs::get_config_dir(true) + "input_configs/";
 	}
 
 	std::string get_input_config_dir(const std::string& title_id)

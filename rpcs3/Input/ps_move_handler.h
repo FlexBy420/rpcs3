@@ -45,8 +45,9 @@ namespace reports
 
 		//                                      ID    Size   Description
 		u8 magnetometer_x2{};                // 0x27    1-   X-axis magnetometer
-		u8 magnetometer_y{};                 // 0x28    1+   Z-axis magnetometer
-		u16 magnetometer_z{};                // 0x29    1-   Y-axis magnetometer
+		u8 magnetometer_y{};                 // 0x28    1+   Y-axis magnetometer
+		u8 magnetometer_yz{};                // 0x29    1    YZ-axis magnetometer
+		u8 magnetometer_z{};                 // 0x2A    1-   Z-axis magnetometer
 		u8 timestamp_lower{};                // 0x2B    1    Timestamp (lower byte)
 		std::array<u8, 5> ext_device_data{}; // 0x2C    5    External device data
 	};
@@ -80,12 +81,48 @@ namespace reports
 	{
 		std::array<u8, 4> data{}; // TODO
 	};
+
+	// Buffer size for calibration data
+	constexpr u32 PSMOVE_CALIBRATION_SIZE = 49;
+
+	// Three blocks, minus header (2 bytes) for blocks 2,3
+	constexpr u32 PSMOVE_ZCM1_CALIBRATION_BLOB_SIZE = PSMOVE_CALIBRATION_SIZE * 3 - 2 * 2;
+
+	// Three blocks, minus header (2 bytes) for block 2
+	constexpr u32 PSMOVE_ZCM2_CALIBRATION_BLOB_SIZE = PSMOVE_CALIBRATION_SIZE * 2 - 2 * 1;
+
+	struct ps_move_calibration_blob
+	{
+		std::array<u8, std::max(PSMOVE_ZCM1_CALIBRATION_BLOB_SIZE, PSMOVE_ZCM2_CALIBRATION_BLOB_SIZE)> data{};
+	};
 }
+
+enum
+{
+	zero_shift = 0x8000,
+};
 
 enum class ps_move_model
 {
 	ZCM1, // PS3
 	ZCM2, // PS4
+};
+
+struct ps_move_calibration
+{
+	bool is_valid = false;
+	f32 accel_x_factor = 1.0f;
+	f32 accel_y_factor = 1.0f;
+	f32 accel_z_factor = 1.0f;
+	f32 accel_x_offset = 0.0f;
+	f32 accel_y_offset = 0.0f;
+	f32 accel_z_offset = 0.0f;
+	f32 gyro_x_gain = 1.0f;
+	f32 gyro_y_gain = 1.0f;
+	f32 gyro_z_gain = 1.0f;
+	f32 gyro_x_offset = 0.0f;
+	f32 gyro_y_offset = 0.0f;
+	f32 gyro_z_offset = 0.0f;
 };
 
 class ps_move_device : public HidDevice
@@ -98,6 +135,7 @@ public:
 	reports::ps_move_output_report last_output_report{};
 	steady_clock::time_point last_output_report_time;
 	u32 external_device_id = 0;
+	ps_move_calibration calibration{};
 
 	const reports::ps_move_input_report_common& input_report_common() const;
 };

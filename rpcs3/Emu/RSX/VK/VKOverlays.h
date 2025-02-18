@@ -52,6 +52,7 @@ namespace vk
 		VkFilter m_sampler_filter = VK_FILTER_LINEAR;
 		u32 m_num_usable_samplers = 1;
 		u32 m_num_input_attachments = 0;
+		u32 m_num_uniform_buffers = 1;
 
 		std::unordered_map<u64, std::unique_ptr<vk::glsl::program>> m_program_cache;
 		std::unique_ptr<vk::sampler> m_sampler;
@@ -237,7 +238,7 @@ namespace vk
 	template<class T>
 	T* get_overlay_pass()
 	{
-		u32 index = id_manager::typeinfo::get_index<T>();
+		u32 index = stx::typeindex<id_manager::typeinfo, T>();
 		auto& e = g_overlay_passes[index];
 
 		if (!e)

@@ -1,4 +1,3 @@
-#include "Utilities/mutex.h"
 #include "Emu/Memory/vm_locking.h"
 #include "Emu/Memory/vm.h"
 
@@ -6,7 +5,6 @@
 
 #include "Emu/Cell/SPUThread.h"
 #include "Emu/CPU/CPUDisAsm.h"
-#include "Emu/Cell/SPUDisAsm.h"
 #include "Emu/RSX/RSXThread.h"
 #include "Emu/RSX/rsx_utils.h"
 #include "Emu/IdManager.h"
@@ -26,7 +24,6 @@
 
 #include "util/logs.hpp"
 #include "util/asm.hpp"
-#include "util/vm.hpp"
 
 LOG_CHANNEL(gui_log, "GUI");
 
@@ -660,11 +657,11 @@ std::string memory_viewer_panel::getHeaderAtAddr(u32 addr) const
 
 	if (spu_boundary <= addr + m_colcount * 4 - 1)
 	{
-		std::shared_ptr<named_thread<spu_thread>> spu;
+		shared_ptr<named_thread<spu_thread>> spu;
 
 		if (const u32 raw_spu_index = (spu_boundary - RAW_SPU_BASE_ADDR) / SPU_LS_SIZE; raw_spu_index < 5)
 		{
-			spu = idm::get<named_thread<spu_thread>>(spu_thread::find_raw_spu(raw_spu_index));
+			spu = idm::get_unlocked<named_thread<spu_thread>>(spu_thread::find_raw_spu(raw_spu_index));
 
 			if (spu && spu->get_type() == spu_type::threaded)
 			{
@@ -673,7 +670,7 @@ std::string memory_viewer_panel::getHeaderAtAddr(u32 addr) const
 		}
 		else if (const u32 spu_index = (spu_boundary - SPU_FAKE_BASE_ADDR) / SPU_LS_SIZE; spu_index < spu_thread::id_count)
 		{
-			spu = idm::get<named_thread<spu_thread>>(spu_thread::id_base | spu_index);
+			spu = idm::get_unlocked<named_thread<spu_thread>>(spu_thread::id_base | spu_index);
 
 			if (spu && spu->get_type() != spu_type::threaded)
 			{

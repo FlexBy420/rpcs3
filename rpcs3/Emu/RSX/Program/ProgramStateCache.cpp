@@ -3,9 +3,6 @@
 #include "Emu/system_config.h"
 
 #include <stack>
-#include "util/v128.hpp"
-#include "util/asm.hpp"
-
 
 #if defined(ARCH_X64)
 #include "emmintrin.h"
@@ -28,25 +25,26 @@ using namespace program_hash_util;
 
 usz vertex_program_utils::get_vertex_program_ucode_hash(const RSXVertexProgram &program)
 {
-	// 64-bit Fowler/Noll/Vo FNV-1a hash code
-	usz hash = 0xCBF29CE484222325ULL;
+	// Checksum as hash with rotated data
 	const void* instbuffer = program.data.data();
-	usz instIndex = 0;
+	u32 instIndex = 0;
+	usz acc0 = 0;
+	usz acc1 = 0;
 
-	for (unsigned i = 0; i < program.data.size() / 4; i++)
+	do
 	{
-		if (program.instruction_mask[i])
+		if (program.instruction_mask[instIndex])
 		{
 			const auto inst = v128::loadu(instbuffer, instIndex);
-			hash ^= inst._u64[0];
-			hash += (hash << 1) + (hash << 4) + (hash << 5) + (hash << 7) + (hash << 8) + (hash << 40);
-			hash ^= inst._u64[1];
-			hash += (hash << 1) + (hash << 4) + (hash << 5) + (hash << 7) + (hash << 8) + (hash << 40);
+			usz tmp0 = std::rotr(inst._u64[0], instIndex * 2);
+			acc0 += tmp0;
+			usz tmp1 = std::rotr(inst._u64[1], (instIndex * 2) + 1);
+			acc1 += tmp1;
 		}
 
 		instIndex++;
-	}
-	return hash;
+	} while (instIndex < (program.data.size() / 4));
+	return acc0 + acc1;
 }
 
 vertex_program_utils::vertex_program_metadata vertex_program_utils::analyse_vertex_program(const u32* data, u32 entry, RSXVertexProgram& dst_prog)
@@ -340,16 +338,23 @@ vertex_program_utils::vertex_program_metadata vertex_program_utils::analyse_vert
 
 usz vertex_program_storage_hash::operator()(const RSXVertexProgram &program) const
 {
-	usz hash = vertex_program_utils::get_vertex_program_ucode_hash(program);
-	hash ^= program.output_mask;
-	hash ^= program.texture_state.texture_dimensions;
-	hash ^= program.texture_state.multisampled_textures;
-	return hash;
+	const usz ucode_hash = vertex_program_utils::get_vertex_program_ucode_hash(program);
+	const u32 state_params[] =
+	{
+		program.ctrl,
+		program.output_mask,
+		program.texture_state.texture_dimensions,
+		program.texture_state.multisampled_textures,
+	};
+	const usz metadata_hash = rpcs3::hash_array(state_params);
+	return rpcs3::hash64(ucode_hash, metadata_hash);
 }
 
 bool vertex_program_compare::operator()(const RSXVertexProgram &binary1, const RSXVertexProgram &binary2) const
 {
 	if (binary1.output_mask != binary2.output_mask)
+		return false;
+	if (binary1.ctrl != binary2.ctrl)
 		return false;
 	if (binary1.texture_state != binary2.texture_state)
 		return false;
@@ -363,13 +368,7 @@ bool vertex_program_compare::operator()(const RSXVertexProgram &binary1, const R
 	usz instIndex = 0;
 	for (unsigned i = 0; i < binary1.data.size() / 4; i++)
 	{
-		const auto active = binary1.instruction_mask[instIndex];
-		if (active != binary2.instruction_mask[instIndex])
-		{
-			return false;
-		}
-
-		if (active)
+		if (binary1.instruction_mask[instIndex])
 		{
 			const auto inst1 = v128::loadu(instBuffer1, instIndex);
 			const auto inst2 = v128::loadu(instBuffer2, instIndex);
@@ -385,10 +384,10 @@ bool vertex_program_compare::operator()(const RSXVertexProgram &binary1, const R
 	return true;
 }
 
-
-bool fragment_program_utils::is_constant(u32 sourceOperand)
+bool fragment_program_utils::is_any_src_constant(v128 sourceOperand)
 {
-	return ((sourceOperand >> 8) & 0x3) == 2;
+	const u64 masked = sourceOperand._u64[1] & 0x30000000300;
+	return (sourceOperand._u32[1] & 0x300) == 0x200 || (static_cast<u32>(masked) == 0x200 || static_cast<u32>(masked >> 32) == 0x200);
 }
 
 usz fragment_program_utils::get_fragment_program_ucode_size(const void* ptr)
@@ -398,12 +397,9 @@ usz fragment_program_utils::get_fragment_program_ucode_size(const void* ptr)
 	while (true)
 	{
 		const v128 inst = v128::loadu(instBuffer, instIndex);
-		bool isSRC0Constant = is_constant(inst._u32[1]);
-		bool isSRC1Constant = is_constant(inst._u32[2]);
-		bool isSRC2Constant = is_constant(inst._u32[3]);
 		bool end = (inst._u32[0] >> 8) & 0x1;
 
-		if (isSRC0Constant || isSRC1Constant || isSRC2Constant)
+		if (is_any_src_constant(inst))
 		{
 			instIndex += 2;
 			if (end)
@@ -477,7 +473,7 @@ fragment_program_utils::fragment_program_metadata fragment_program_utils::analys
 				}
 			}
 
-			if (is_constant(inst._u32[1]) || is_constant(inst._u32[2]) || is_constant(inst._u32[3]))
+		if (is_any_src_constant(inst))
 			{
 				//Instruction references constant, skip one slot occupied by data
 				index++;
@@ -511,51 +507,59 @@ fragment_program_utils::fragment_program_metadata fragment_program_utils::analys
 
 usz fragment_program_utils::get_fragment_program_ucode_hash(const RSXFragmentProgram& program)
 {
-	// 64-bit Fowler/Noll/Vo FNV-1a hash code
-	usz hash = 0xCBF29CE484222325ULL;
+	// Checksum as hash with rotated data
 	const void* instbuffer = program.get_data();
-	usz instIndex = 0;
+	u32 instIndex = 0;
+	usz acc0 = 0;
+	usz acc1 = 0;
 	while (true)
 	{
 		const auto inst = v128::loadu(instbuffer, instIndex);
-		hash ^= inst._u64[0];
-		hash += (hash << 1) + (hash << 4) + (hash << 5) + (hash << 7) + (hash << 8) + (hash << 40);
-		hash ^= inst._u64[1];
-		hash += (hash << 1) + (hash << 4) + (hash << 5) + (hash << 7) + (hash << 8) + (hash << 40);
+		usz tmp0 = std::rotr(inst._u64[0], instIndex * 2);
+		acc0 += tmp0;
+		usz tmp1 = std::rotr(inst._u64[1], (instIndex * 2) + 1);
+		acc1 += tmp1;
 		instIndex++;
 		// Skip constants
-		if (fragment_program_utils::is_constant(inst._u32[1]) ||
-			fragment_program_utils::is_constant(inst._u32[2]) ||
-			fragment_program_utils::is_constant(inst._u32[3]))
+		if (fragment_program_utils::is_any_src_constant(inst))
 			instIndex++;
 
 		bool end = (inst._u32[0] >> 8) & 0x1;
 		if (end)
-			return hash;
+			return acc0 + acc1;
 	}
 	return 0;
 }
 
 usz fragment_program_storage_hash::operator()(const RSXFragmentProgram& program) const
 {
-	usz hash = fragment_program_utils::get_fragment_program_ucode_hash(program);
-	hash ^= program.ctrl;
-	hash ^= +program.two_sided_lighting;
-	hash ^= program.texture_state.texture_dimensions;
-	hash ^= program.texture_state.shadow_textures;
-	hash ^= program.texture_state.redirected_textures;
-	hash ^= program.texture_state.multisampled_textures;
-	hash ^= program.texcoord_control_mask;
-
-	return hash;
+	const usz ucode_hash = fragment_program_utils::get_fragment_program_ucode_hash(program);
+	const u32 state_params[] =
+	{
+		program.ctrl,
+		program.two_sided_lighting ? 1u : 0u,
+		program.texture_state.texture_dimensions,
+		program.texture_state.shadow_textures,
+		program.texture_state.redirected_textures,
+		program.texture_state.multisampled_textures,
+		program.texcoord_control_mask,
+		program.mrt_buffers_count
+	};
+	const usz metadata_hash = rpcs3::hash_array(state_params);
+	return rpcs3::hash64(ucode_hash, metadata_hash);
 }
 
 bool fragment_program_compare::operator()(const RSXFragmentProgram& binary1, const RSXFragmentProgram& binary2) const
 {
-	if (binary1.ctrl != binary2.ctrl || binary1.texture_state != binary2.texture_state ||
+	if (binary1.ucode_length != binary2.ucode_length ||
+		binary1.ctrl != binary2.ctrl ||
+		binary1.texture_state != binary2.texture_state ||
 		binary1.texcoord_control_mask != binary2.texcoord_control_mask ||
-		binary1.two_sided_lighting != binary2.two_sided_lighting)
+		binary1.two_sided_lighting != binary2.two_sided_lighting ||
+		binary1.mrt_buffers_count != binary2.mrt_buffers_count)
+	{
 		return false;
+	}
 
 	const void* instBuffer1 = binary1.get_data();
 	const void* instBuffer2 = binary2.get_data();
@@ -566,18 +570,20 @@ bool fragment_program_compare::operator()(const RSXFragmentProgram& binary1, con
 		const auto inst2 = v128::loadu(instBuffer2, instIndex);
 
 		if (inst1._u ^ inst2._u)
+		{
 			return false;
+		}
 
 		instIndex++;
 		// Skip constants
-		if (fragment_program_utils::is_constant(inst1._u32[1]) ||
-			fragment_program_utils::is_constant(inst1._u32[2]) ||
-			fragment_program_utils::is_constant(inst1._u32[3]))
+		if (fragment_program_utils::is_any_src_constant(inst1))
 			instIndex++;
 
-		bool end = ((inst1._u32[0] >> 8) & 0x1) && ((inst2._u32[0] >> 8) & 0x1);
+		const bool end = ((inst1._u32[0] >> 8) & 0x1);
 		if (end)
+		{
 			return true;
+		}
 	}
 }
 

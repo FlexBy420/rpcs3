@@ -2,8 +2,6 @@
 #include "qt_utils.h"
 #include "gui_settings.h"
 
-#include "rpcs3_version.h"
-#include "Utilities/mutex.h"
 #include "Utilities/lockless.h"
 #include "util/asm.hpp"
 
@@ -14,7 +12,6 @@
 #include <QTimer>
 #include <QStringBuilder>
 
-#include <sstream>
 #include <deque>
 #include <mutex>
 
@@ -157,7 +154,7 @@ log_frame::log_frame(std::shared_ptr<gui_settings> _gui_settings, QWidget* paren
 	setWidget(m_tabWidget);
 
 	// Open or create TTY.log
-	m_tty_file.open(fs::get_cache_dir() + "TTY.log", fs::read + fs::create);
+	m_tty_file.open(fs::get_log_dir() + "TTY.log", fs::read + fs::create);
 
 	CreateAndConnectActions();
 	LoadSettings();

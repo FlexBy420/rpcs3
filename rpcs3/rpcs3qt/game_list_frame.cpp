@@ -2,28 +2,23 @@
 #include "qt_utils.h"
 #include "settings_dialog.h"
 #include "pad_settings_dialog.h"
-#include "custom_table_widget_item.h"
 #include "input_dialog.h"
 #include "localized.h"
 #include "progress_dialog.h"
 #include "persistent_settings.h"
 #include "emu_settings.h"
 #include "gui_settings.h"
-#include "game_list_delegate.h"
 #include "game_list_table.h"
 #include "game_list_grid.h"
 #include "game_list_grid_item.h"
 #include "patch_manager_dialog.h"
 
-#include "Emu/Memory/vm.h"
 #include "Emu/System.h"
 #include "Emu/vfs_config.h"
 #include "Emu/system_utils.hpp"
 #include "Loader/PSF.h"
 #include "util/types.hpp"
 #include "Utilities/File.h"
-#include "Utilities/mutex.h"
-#include "util/yaml.hpp"
 #include "util/sysinfo.hpp"
 #include "Input/pad_thread.h"
 
@@ -1133,7 +1128,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 
 	static const auto is_game_running = [](const std::string& serial)
 	{
-		return Emu.GetStatus(false) != system_state::stopped && (serial == Emu.GetTitleID() || (serial == "vsh.self" && Emu.IsVsh()));
+		return !Emu.IsStopped(true) && (serial == Emu.GetTitleID() || (serial == "vsh.self" && Emu.IsVsh()));
 	};
 
 	const bool is_current_running_game = is_game_running(current_game.serial);
@@ -1197,9 +1192,9 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 		});
 	}
 
-	extern bool is_savestate_compatible(fs::file&& file, std::string_view filepath);
+	extern bool is_savestate_compatible(const std::string& filepath);
 
-	if (const std::string sstate = get_savestate_file(current_game.serial, current_game.path, 0, 0); is_savestate_compatible(fs::file(sstate), sstate))
+	if (const std::string sstate = get_savestate_file(current_game.serial, current_game.path, 0, 0); is_savestate_compatible(sstate))
 	{
 		QAction* boot_state = menu.addAction(is_current_running_game
 			? tr("&Reboot with savestate")
@@ -1315,14 +1310,14 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 	{
 		remove_menu->addSeparator();
 
-		QAction* remove_savestate = remove_menu->addAction(tr("&Remove Savestate"));
+		QAction* remove_savestate = remove_menu->addAction(tr("&Remove Savestates"));
 		remove_savestate->setEnabled(!is_current_running_game);
 		connect(remove_savestate, &QAction::triggered, [this, current_game, savestate_dir]()
 		{
 			if (is_game_running(current_game.serial))
 				return;
 
-			if (QMessageBox::question(this, tr("Confirm Removal"), tr("Remove savestate?")) != QMessageBox::Yes)
+			if (QMessageBox::question(this, tr("Confirm Removal"), tr("Remove savestates?")) != QMessageBox::Yes)
 				return;
 
 			RemoveContentPath(savestate_dir, "savestate");
@@ -1768,7 +1763,7 @@ void game_list_frame::ShowContextMenu(const QPoint &pos)
 		QCheckBox* disc = new QCheckBox(tr("Remove title from game list (Disc Game path is not removed!)"));
 		QCheckBox* caches = new QCheckBox(tr("Remove caches and custom configs"));
 		QCheckBox* icons = new QCheckBox(tr("Remove icons and shortcuts"));
-		QCheckBox* savestate = new QCheckBox(tr("Remove savestate"));
+		QCheckBox* savestate = new QCheckBox(tr("Remove savestates"));
 		QCheckBox* captures = new QCheckBox(tr("Remove captures"));
 		QCheckBox* recordings = new QCheckBox(tr("Remove recordings"));
 		QCheckBox* screenshots = new QCheckBox(tr("Remove screenshots"));
@@ -2048,7 +2043,7 @@ bool game_list_frame::RemoveCustomPadConfiguration(const std::string& title_id, 
 	if (!fs::is_dir(config_dir))
 		return true;
 
-	if (is_interactive && QMessageBox::question(this, tr("Confirm Removal"), (!Emu.IsStopped() && Emu.GetTitleID() == title_id)
+	if (is_interactive && QMessageBox::question(this, tr("Confirm Removal"), (!Emu.IsStopped(true) && Emu.GetTitleID() == title_id)
 		? tr("Remove custom pad configuration?\nYour configuration will revert to the global pad settings.")
 		: tr("Remove custom pad configuration?")) != QMessageBox::Yes)
 		return true;
@@ -2064,7 +2059,7 @@ bool game_list_frame::RemoveCustomPadConfiguration(const std::string& title_id, 
 		{
 			game->hasCustomPadConfig = false;
 		}
-		if (!Emu.IsStopped() && Emu.GetTitleID() == title_id)
+		if (!Emu.IsStopped(true) && Emu.GetTitleID() == title_id)
 		{
 			pad::set_enabled(false);
 			pad::reset(title_id);
@@ -2277,11 +2272,128 @@ void game_list_frame::RemoveHDD1Cache(const std::string& base_dir, const std::st
 		game_list_log.fatal("Only %d/%d HDD1 cache directories could be removed in %s (%s)", dirs_removed, dirs_total, base_dir, title_id);
 }
 
+void game_list_frame::BatchActionBySerials(progress_dialog* pdlg, const std::set<std::string>& serials, QString progressLabel, std::function<bool(const std::string&)> action, std::function<void(u32, u32)> cancel_log, bool refresh_on_finish, bool can_be_concurrent, std::function<bool()> should_wait_cb)
+{
+	// Concurrent tasks should not wait (at least not in current implementation)
+	ensure(!should_wait_cb || !can_be_concurrent);
+
+	g_system_progress_canceled = false;
+
+	const std::shared_ptr<std::function<bool(int)>> iterate_over_serial = std::make_shared<std::function<bool(int)>>();
+
+	const std::shared_ptr<atomic_t<int>> index = std::make_shared<atomic_t<int>>(0);
+
+	const int serials_size = ::narrow<int>(serials.size());
+
+	*iterate_over_serial = [=, this, index_ptr = index](int index)
+	{
+		if (index == serials_size)
+		{
+			return false;
+		}
+
+		const std::string& serial = *std::next(serials.begin(), index);
+
+		if (pdlg->wasCanceled() || g_system_progress_canceled.exchange(false))
+		{
+			if (cancel_log)
+			{
+				cancel_log(index, serials_size);
+			}
+			return false;
+		}
+
+		if (action(serial))
+		{
+			const int done = index_ptr->load();
+			pdlg->setLabelText(progressLabel.arg(done + 1).arg(serials_size));
+			pdlg->SetValue(done + 1);
+		}
+
+		(*index_ptr)++;
+		return true;
+	};
+
+	if (can_be_concurrent)
+	{
+		// Unused currently
+
+		QList<int> indices;
+
+		for (int i = 0; i < serials_size; i++)
+		{
+			indices.append(i);
+		}
+
+		QFutureWatcher<void>* future_watcher = new QFutureWatcher<void>(this);
+
+		future_watcher->setFuture(QtConcurrent::map(std::move(indices), *iterate_over_serial));
+
+		connect(future_watcher, &QFutureWatcher<void>::finished, this, [=, this]()
+		{
+			pdlg->setLabelText(progressLabel.arg(*index).arg(serials_size));
+			pdlg->setCancelButtonText(tr("OK"));
+			QApplication::beep();
+
+			if (refresh_on_finish && index)
+			{
+				Refresh(true);
+			}
+
+			future_watcher->deleteLater();
+		});
+
+		return;
+	}
+
+	const std::shared_ptr<std::function<void()>> periodic_func = std::make_shared<std::function<void()>>();
+
+	*periodic_func = [=, this]()
+	{
+		if (should_wait_cb && should_wait_cb())
+		{
+			// Conditions are not met for execution
+			// Check again later
+			QTimer::singleShot(5, this, *periodic_func);
+			return;
+		}
+
+		if ((*iterate_over_serial)(*index))
+		{
+			QTimer::singleShot(1, this, *periodic_func);
+			return;
+		}
+
+		pdlg->setLabelText(progressLabel.arg(*index).arg(serials_size));
+		pdlg->setCancelButtonText(tr("OK"));
+		connect(pdlg, &progress_dialog::canceled, this, [pdlg](){ pdlg->deleteLater(); });
+		QApplication::beep();
+
+		if (refresh_on_finish && index)
+		{
+			Refresh(true);
+		}
+	};
+
+	// Invoked on the next event loop processing iteration
+	QTimer::singleShot(1, this, *periodic_func);
+}
+
 void game_list_frame::BatchCreateCPUCaches(const std::vector<game_info>& game_data)
 {
-	const std::string vsh_path = g_cfg_vfs.get_dev_flash() + "vsh/module/";
-	const bool vsh_exists = game_data.empty() && fs::is_file(vsh_path + "vsh.self");
-	const usz total = !game_data.empty() ? game_data.size() : (m_game_data.size() + (vsh_exists ? 1 : 0));
+	std::set<std::string> serials;
+
+	if (game_data.empty())
+	{
+		serials.emplace("vsh.self");
+	}
+
+	for (const auto& game : (game_data.empty() ? m_game_data : game_data))
+	{
+		serials.emplace(game->info.serial);
+	}
+
+	const usz total = serials.size();
 
 	if (total == 0)
 	{
@@ -2297,67 +2409,41 @@ void game_list_frame::BatchCreateCPUCaches(const std::vector<game_info>& game_da
 	const QString main_label = tr("Creating all LLVM caches");
 
 	progress_dialog* pdlg = new progress_dialog(tr("LLVM Cache Batch Creation"), main_label, tr("Cancel"), 0, ::narrow<s32>(total), false, this);
-	pdlg->setWindowFlags(Qt::Window | Qt::WindowMinimizeButtonHint);
 	pdlg->setAutoClose(false);
 	pdlg->setAutoReset(false);
-	pdlg->show();
-	QApplication::processEvents();
+	pdlg->open();
 
-	u32 created = 0;
-
-	const auto wait_until_compiled = [pdlg]() -> bool
+	connect(pdlg, &progress_dialog::canceled, this, []()
 	{
-		while (!Emu.IsStopped())
+		if (!Emu.IsStopped())
 		{
-			if (pdlg->wasCanceled())
+			Emu.GracefulShutdown(false, true);
+		}
+	});
+
+	BatchActionBySerials(pdlg, serials, tr("%0\nProgress: %1/%2 caches compiled").arg(main_label),
+	[&, game_data](const std::string& serial)
+	{
+		if (Emu.IsStopped(true))
+		{
+			const auto it = std::find_if(m_game_data.begin(), m_game_data.end(), FN(x->info.serial == serial));
+
+			if (it != m_game_data.end())
 			{
-				return false;
+				return CreateCPUCaches((*it)->info.path, serial);
 			}
-			QApplication::processEvents();
 		}
-		return true;
-	};
 
-	if (vsh_exists)
+		return false;
+	},
+	[this](u32, u32)
 	{
-		pdlg->setLabelText(tr("%0\nProgress: %1/%2. Compiling caches for VSH...", "Second line after main label").arg(main_label).arg(created).arg(total));
-		QApplication::processEvents();
-
-		if (CreateCPUCaches(vsh_path) && wait_until_compiled())
-		{
-			pdlg->SetValue(++created);
-		}
-	}
-
-	for (const auto& game : (game_data.empty() ? m_game_data : game_data))
-	{
-		if (pdlg->wasCanceled() || g_system_progress_canceled)
-		{
-			break;
-		}
-
-		pdlg->setLabelText(tr("%0\nProgress: %1/%2. Compiling caches for %3...", "Second line after main label").arg(main_label).arg(created).arg(total).arg(qstr(game->info.serial)));
-		QApplication::processEvents();
-
-		if (CreateCPUCaches(game) && wait_until_compiled())
-		{
-			pdlg->SetValue(++created);
-		}
-	}
-
-	if (pdlg->wasCanceled() || g_system_progress_canceled)
-	{
-		pdlg->deleteLater(); // We did not allow deletion earlier to prevent segfaults when canceling.
 		game_list_log.notice("LLVM Cache Batch Creation was canceled");
-		Emu.GracefulShutdown(false);
-	}
-	else
+	}, false, false,
+	[]()
 	{
-		pdlg->SetDeleteOnClose();
-		pdlg->setLabelText(tr("Created LLVM Caches for %n title(s)", "", created));
-		pdlg->setCancelButtonText(tr("OK"));
-		QApplication::beep();
-	}
+		return !Emu.IsStopped(true);
+	});
 }
 
 void game_list_frame::BatchRemovePPUCaches()
@@ -2368,7 +2454,7 @@ void game_list_frame::BatchRemovePPUCaches()
 	}
 
 	std::set<std::string> serials;
-	serials.emplace("vsh");
+	serials.emplace("vsh.self");
 
 	for (const auto& game : m_game_data)
 	{
@@ -2386,35 +2472,17 @@ void game_list_frame::BatchRemovePPUCaches()
 	progress_dialog* pdlg = new progress_dialog(tr("PPU Cache Batch Removal"), tr("Removing all PPU caches"), tr("Cancel"), 0, total, false, this);
 	pdlg->setAutoClose(false);
 	pdlg->setAutoReset(false);
-	pdlg->show();
+	pdlg->open();
 
-	u32 removed = 0;
-	for (const auto& serial : serials)
+	BatchActionBySerials(pdlg, serials, tr("%0/%1 caches cleared"),
+	[this](const std::string& serial)
 	{
-		if (pdlg->wasCanceled())
-		{
-			break;
-		}
-		QApplication::processEvents();
-
-		if (RemovePPUCache(GetCacheDirBySerial(serial)))
-		{
-			pdlg->SetValue(++removed);
-		}
-	}
-
-	if (pdlg->wasCanceled())
+		return Emu.IsStopped(true) && RemovePPUCache(GetCacheDirBySerial(serial));
+	},
+	[this](u32, u32)
 	{
-		pdlg->deleteLater(); // We did not allow deletion earlier to prevent segfaults when canceling.
 		game_list_log.notice("PPU Cache Batch Removal was canceled");
-	}
-	else
-	{
-		pdlg->SetDeleteOnClose();
-		pdlg->setLabelText(tr("%0/%1 caches cleared").arg(removed).arg(total));
-		pdlg->setCancelButtonText(tr("OK"));
-		QApplication::beep();
-	}
+	}, false);
 }
 
 void game_list_frame::BatchRemoveSPUCaches()
@@ -2425,7 +2493,7 @@ void game_list_frame::BatchRemoveSPUCaches()
 	}
 
 	std::set<std::string> serials;
-	serials.emplace("vsh");
+	serials.emplace("vsh.self");
 
 	for (const auto& game : m_game_data)
 	{
@@ -2443,35 +2511,17 @@ void game_list_frame::BatchRemoveSPUCaches()
 	progress_dialog* pdlg = new progress_dialog(tr("SPU Cache Batch Removal"), tr("Removing all SPU caches"), tr("Cancel"), 0, total, false, this);
 	pdlg->setAutoClose(false);
 	pdlg->setAutoReset(false);
-	pdlg->show();
+	pdlg->open();
 
-	u32 removed = 0;
-	for (const auto& serial : serials)
+	BatchActionBySerials(pdlg, serials, tr("%0/%1 caches cleared"),
+	[this](const std::string& serial)
 	{
-		if (pdlg->wasCanceled())
-		{
-			break;
-		}
-		QApplication::processEvents();
-
-		if (RemoveSPUCache(GetCacheDirBySerial(serial)))
-		{
-			pdlg->SetValue(++removed);
-		}
-	}
-
-	if (pdlg->wasCanceled())
+		return Emu.IsStopped(true) && RemoveSPUCache(GetCacheDirBySerial(serial));
+	},
+	[this](u32 removed, u32 total)
 	{
-		pdlg->deleteLater(); // We did not allow deletion earlier to prevent segfaults when canceling.
 		game_list_log.notice("SPU Cache Batch Removal was canceled. %d/%d folders cleared", removed, total);
-	}
-	else
-	{
-		pdlg->SetDeleteOnClose();
-		pdlg->setLabelText(tr("%0/%1 caches cleared").arg(removed).arg(total));
-		pdlg->setCancelButtonText(tr("OK"));
-		QApplication::beep();
-	}
+	}, false);
 }
 
 void game_list_frame::BatchRemoveCustomConfigurations()
@@ -2484,6 +2534,7 @@ void game_list_frame::BatchRemoveCustomConfigurations()
 			serials.emplace(game->info.serial);
 		}
 	}
+
 	const u32 total = ::size32(serials);
 
 	if (total == 0)
@@ -2495,37 +2546,17 @@ void game_list_frame::BatchRemoveCustomConfigurations()
 	progress_dialog* pdlg = new progress_dialog(tr("Custom Configuration Batch Removal"), tr("Removing all custom configurations"), tr("Cancel"), 0, total, false, this);
 	pdlg->setAutoClose(false);
 	pdlg->setAutoReset(false);
-	pdlg->show();
+	pdlg->open();
 
-	u32 removed = 0;
-	for (const auto& serial : serials)
+	BatchActionBySerials(pdlg, serials, tr("%0/%1 custom configurations cleared"),
+	[this](const std::string& serial)
 	{
-		if (pdlg->wasCanceled())
-		{
-			break;
-		}
-		QApplication::processEvents();
-
-		if (RemoveCustomConfiguration(serial))
-		{
-			pdlg->SetValue(++removed);
-		}
-	}
-
-	if (pdlg->wasCanceled())
+		return Emu.IsStopped(true) && RemoveCustomConfiguration(serial);
+	},
+	[this](u32 removed, u32 total)
 	{
-		pdlg->deleteLater(); // We did not allow deletion earlier to prevent segfaults when canceling.
 		game_list_log.notice("Custom Configuration Batch Removal was canceled. %d/%d custom configurations cleared", removed, total);
-	}
-	else
-	{
-		pdlg->SetDeleteOnClose();
-		pdlg->setLabelText(tr("%0/%1 custom configurations cleared").arg(removed).arg(total));
-		pdlg->setCancelButtonText(tr("OK"));
-		QApplication::beep();
-	}
-
-	Refresh(true);
+	}, true);
 }
 
 void game_list_frame::BatchRemoveCustomPadConfigurations()
@@ -2549,37 +2580,17 @@ void game_list_frame::BatchRemoveCustomPadConfigurations()
 	progress_dialog* pdlg = new progress_dialog(tr("Custom Pad Configuration Batch Removal"), tr("Removing all custom pad configurations"), tr("Cancel"), 0, total, false, this);
 	pdlg->setAutoClose(false);
 	pdlg->setAutoReset(false);
-	pdlg->show();
+	pdlg->open();
 
-	u32 removed = 0;
-	for (const auto& serial : serials)
+	BatchActionBySerials(pdlg, serials, tr("%0/%1 custom pad configurations cleared"),
+	[this](const std::string& serial)
 	{
-		if (pdlg->wasCanceled())
-		{
-			break;
-		}
-		QApplication::processEvents();
-
-		if (RemoveCustomPadConfiguration(serial))
-		{
-			pdlg->SetValue(++removed);
-		}
-	}
-
-	if (pdlg->wasCanceled())
+		return Emu.IsStopped(true) && RemoveCustomPadConfiguration(serial);
+	},
+	[this](u32 removed, u32 total)
 	{
-		pdlg->deleteLater(); // We did not allow deletion earlier to prevent segfaults when canceling.
 		game_list_log.notice("Custom Pad Configuration Batch Removal was canceled. %d/%d custom pad configurations cleared", removed, total);
-	}
-	else
-	{
-		pdlg->SetDeleteOnClose();
-		pdlg->setLabelText(tr("%0/%1 custom pad configurations cleared").arg(removed).arg(total));
-		pdlg->setCancelButtonText(tr("OK"));
-		QApplication::beep();
-	}
-
-	Refresh(true);
+	}, true);
 }
 
 void game_list_frame::BatchRemoveShaderCaches()
@@ -2590,7 +2601,7 @@ void game_list_frame::BatchRemoveShaderCaches()
 	}
 
 	std::set<std::string> serials;
-	serials.emplace("vsh");
+	serials.emplace("vsh.self");
 
 	for (const auto& game : m_game_data)
 	{
@@ -2608,35 +2619,17 @@ void game_list_frame::BatchRemoveShaderCaches()
 	progress_dialog* pdlg = new progress_dialog(tr("Shader Cache Batch Removal"), tr("Removing all shader caches"), tr("Cancel"), 0, total, false, this);
 	pdlg->setAutoClose(false);
 	pdlg->setAutoReset(false);
-	pdlg->show();
+	pdlg->open();
 
-	u32 removed = 0;
-	for (const auto& serial : serials)
+	BatchActionBySerials(pdlg, serials, tr("%0/%1 shader caches cleared"),
+	[this](const std::string& serial)
 	{
-		if (pdlg->wasCanceled())
-		{
-			break;
-		}
-		QApplication::processEvents();
-
-		if (RemoveShadersCache(GetCacheDirBySerial(serial)))
-		{
-			pdlg->SetValue(++removed);
-		}
-	}
-
-	if (pdlg->wasCanceled())
+		return Emu.IsStopped(true) && RemoveShadersCache(GetCacheDirBySerial(serial));
+	},
+	[this](u32 removed, u32 total)
 	{
-		pdlg->deleteLater(); // We did not allow deletion earlier to prevent segfaults when canceling.
-		game_list_log.notice("Shader Cache Batch Removal was canceled");
-	}
-	else
-	{
-		pdlg->SetDeleteOnClose();
-		pdlg->setLabelText(tr("%0/%1 shader caches cleared").arg(removed).arg(total));
-		pdlg->setCancelButtonText(tr("OK"));
-		QApplication::beep();
-	}
+		game_list_log.notice("Shader Cache Batch Removal was canceled. %d/%d cleared", removed, total);
+	}, false);
 }
 
 void game_list_frame::ShowCustomConfigIcon(const game_info& game)

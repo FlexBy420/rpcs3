@@ -20,6 +20,10 @@ add_library(rpcs3_emu STATIC
     IPC_socket.cpp
 )
 
+if(USE_LTO)
+    set_target_properties(rpcs3_emu PROPERTIES INTERPROCEDURAL_OPTIMIZATION ON)
+endif()
+
 if(USE_ASAN)
     set_source_files_properties(../../Utilities/Thread.cpp PROPERTIES COMPILE_DEFINITIONS USE_ASAN)
 endif()
@@ -125,6 +129,7 @@ target_sources(rpcs3_emu PRIVATE
 # Audio
 target_sources(rpcs3_emu PRIVATE
     Audio/audio_resampler.cpp
+    Audio/audio_utils.cpp
     Audio/AudioDumper.cpp
     Audio/AudioBackend.cpp
     Audio/Cubeb/CubebBackend.cpp
@@ -171,6 +176,7 @@ target_link_libraries(rpcs3_emu
 
 # Cell
 target_sources(rpcs3_emu PRIVATE
+    Cell/ErrorCodes.cpp
     Cell/MFC.cpp
     Cell/PPUAnalyser.cpp
     Cell/PPUDisAsm.cpp
@@ -252,6 +258,7 @@ target_sources(rpcs3_emu PRIVATE
     Cell/Modules/cellCrossController.cpp
     Cell/Modules/cellDaisy.cpp
     Cell/Modules/cellDmux.cpp
+    Cell/Modules/cellDmuxPamf.cpp
     Cell/Modules/cellDtcpIpUtility.cpp
     Cell/Modules/cellFiber.cpp
     Cell/Modules/cellFont.cpp
@@ -459,6 +466,7 @@ target_sources(rpcs3_emu PRIVATE
     NP/rpcn_countries.cpp
     NP/upnp_config.cpp
     NP/upnp_handler.cpp
+    NP/ip_address.cpp
 )
 
 # Memory
@@ -475,6 +483,8 @@ target_sources(rpcs3_emu PRIVATE
     RSX/Common/TextureUtils.cpp
     RSX/Common/texture_cache.cpp
     RSX/Core/RSXContext.cpp
+    RSX/Core/RSXDisplay.cpp
+    RSX/Core/RSXDrawCommands.cpp
     RSX/gcm_enums.cpp
     RSX/gcm_printing.cpp
     RSX/GL/GLCommonDecompiler.cpp
@@ -488,6 +498,7 @@ target_sources(rpcs3_emu PRIVATE
     RSX/GL/GLPipelineCompiler.cpp
     RSX/GL/GLPresent.cpp
     RSX/GL/GLRenderTargets.cpp
+    RSX/GL/GLResolveHelper.cpp
     RSX/GL/GLShaderInterpreter.cpp
     RSX/GL/GLTexture.cpp
     RSX/GL/GLTextureCache.cpp
@@ -505,6 +516,7 @@ target_sources(rpcs3_emu PRIVATE
     RSX/GL/OpenGL.cpp
     RSX/GL/upscalers/fsr1/fsr_pass.cpp
     RSX/GSRender.cpp
+    RSX/Host/MM.cpp
     RSX/Host/RSXDMAWriter.cpp
     RSX/Null/NullGSRender.cpp
     RSX/NV47/FW/draw_call.cpp
@@ -522,8 +534,10 @@ target_sources(rpcs3_emu PRIVATE
     RSX/Overlays/HomeMenu/overlay_home_menu_message_box.cpp
     RSX/Overlays/HomeMenu/overlay_home_menu_page.cpp
     RSX/Overlays/HomeMenu/overlay_home_menu_settings.cpp
+    RSX/Overlays/HomeMenu/overlay_home_menu_savestate.cpp
     RSX/Overlays/Network/overlay_recvmessage_dialog.cpp
     RSX/Overlays/Network/overlay_sendmessage_dialog.cpp
+    RSX/Overlays/Trophies/overlay_trophy_list_dialog.cpp
     RSX/Overlays/overlays.cpp
     RSX/Overlays/overlay_animated_icon.cpp
     RSX/Overlays/overlay_animation.cpp
@@ -551,6 +565,7 @@ target_sources(rpcs3_emu PRIVATE
     RSX/Program/CgBinaryFragmentProgram.cpp
     RSX/Program/CgBinaryVertexProgram.cpp
     RSX/Program/FragmentProgramDecompiler.cpp
+    RSX/Program/FragmentProgramRegister.cpp
     RSX/Program/GLSLCommon.cpp
     RSX/Program/ProgramStateCache.cpp
     RSX/Program/program_util.cpp
@@ -587,6 +602,7 @@ if(TARGET 3rdparty_vulkan)
         RSX/VK/VKAsyncScheduler.cpp
         RSX/VK/VKCommandStream.cpp
         RSX/VK/VKCommonDecompiler.cpp
+        RSX/VK/VKCommonPipelineLayout.cpp
         RSX/VK/VKCompute.cpp
         RSX/VK/VKDMA.cpp
         RSX/VK/VKDraw.cpp
@@ -611,6 +627,11 @@ if(TARGET 3rdparty_vulkan)
         RSX/VK/VKVertexProgram.cpp
         RSX/VK/VKTextureCache.cpp
     )
+    if(MSVC)
+        set_source_files_properties(RSX/VK/vkutils/shared.cpp PROPERTIES
+        COMPILE_FLAGS /EHs-
+        SKIP_PRECOMPILE_HEADERS ON)
+    endif()
 endif()
 
 target_link_libraries(rpcs3_emu
@@ -620,7 +641,7 @@ target_link_libraries(rpcs3_emu
         3rdparty::vulkan 3rdparty::glew
         3rdparty::libusb 3rdparty::wolfssl
     PRIVATE
-        3rdparty::xxhash
+        3rdparty::glslang
 )
 
 if(APPLE)
