@@ -407,7 +407,7 @@ jobs:
   Windows_Build_ARM:
     # Only run push event on master branch of main repo, but run all PRs
     if: github.event_name != 'push' || (github.repository == 'RPCS3/rpcs3' && github.ref_name == 'master')
-    name: RPCS3 Windows ARM64
+    name: RPCS3 Windows ARM
     runs-on: windows-11-arm
     env:
       COMPILER: msvc
@@ -437,9 +437,9 @@ jobs:
       - name: Add msbuild to PATH
         uses: microsoft/setup-msbuild@v2
 
-      - name: Compile RPCS3 (ARM64)
+      - name: Compile RPCS3 (ARM)
         shell: pwsh
-        run: msbuild rpcs3.sln /p:Configuration=Release /v:minimal /p:Platform=ARM64 /p:PreferredToolArchitecture=arm64
+        run: msbuild rpcs3.sln /p:Configuration=Release /v:minimal /p:Platform=ARM /p:PreferredToolArchitecture=arm
 
   FreeBSD_Build:
       # Only run push event on master branch of main repo, but run all PRs
