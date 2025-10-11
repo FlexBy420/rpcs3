@@ -386,6 +386,8 @@ jobs:
         run: |
           export CCACHE_DIR=$(cygpath -u "$CCACHE_DIR")
           echo "CCACHE_DIR=$CCACHE_DIR"
+          export CXXFLAGS="-include cstdlib"
+          export CFLAGS="-include stdlib.h"
           .ci/setup-windows-ci-vars.sh ${{ matrix.arch }} ${{ matrix.compiler }}
           .ci/build-windows-clang.sh
 
