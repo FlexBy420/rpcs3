@@ -40,6 +40,7 @@ game_list_table::game_list_table(game_list_frame* frame, std::shared_ptr<persist
 	setAlternatingRowColors(true);
 	setColumnCount(static_cast<int>(gui::game_list_columns::count));
 	setMouseTracking(true);
+	setColumnHidden(static_cast<int>(gui::game_list_columns::region), true);
 
 	connect(this, &game_list_table::size_on_disk_ready, this, [this](const game_info& game, movie_item_base* item)
 	{
@@ -360,11 +361,34 @@ void game_list_table::populate(
 			}
 		}
 
+		static QString GetRegionFromSerial(const QString& serial)
+		{
+		    if (serial.length() < 3)
+		        return "unknown";
+
+		    const QChar c = serial[2].toUpper();
+
+		    switch (c.unicode())
+		    {
+		    case 'E': return "Europe";
+		    case 'U': return "America";
+		    case 'A': return "Asia";
+		    case 'J': return "Japan";
+		    case 'H': return "Hong Kong";
+		    case 'K': return "Korea";
+		    case 'I':
+		    case 'T': return "International";
+		    default:
+		        return "unknown";
+		    }
+		}
+
 		const u64 game_size = game->info.size_on_disk;
 
 		setItem(row, static_cast<int>(gui::game_list_columns::icon),       icon_item);
 		setItem(row, static_cast<int>(gui::game_list_columns::name),       title_item);
 		setItem(row, static_cast<int>(gui::game_list_columns::serial),     serial_item);
+		setItem(row, static_cast<int>(gui::game_list_columns::region),	   new custom_table_widget_item(GetRegionFromSerial(serial)));
 		setItem(row, static_cast<int>(gui::game_list_columns::firmware),   new custom_table_widget_item(game->info.fw));
 		setItem(row, static_cast<int>(gui::game_list_columns::version),    new custom_table_widget_item(app_version));
 		setItem(row, static_cast<int>(gui::game_list_columns::category),   new custom_table_widget_item(game->localized_category));

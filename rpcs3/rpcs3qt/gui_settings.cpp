@@ -52,6 +52,7 @@ namespace gui
 		case game_list_columns::icon: return "column_icon";
 		case game_list_columns::name: return "column_name";
 		case game_list_columns::serial: return "column_serial";
+		case game_list_columns::region: return "column_region";
 		case game_list_columns::firmware: return "column_firmware";
 		case game_list_columns::version: return "column_version";
 		case game_list_columns::category: return "column_category";

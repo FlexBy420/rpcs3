@@ -110,6 +110,7 @@ game_list_frame::game_list_frame(std::shared_ptr<gui_settings> gui_settings, std
 	add_column(gui::game_list_columns::icon);
 	add_column(gui::game_list_columns::name);
 	add_column(gui::game_list_columns::serial);
+	add_column(gui::game_list_columns::region);
 	add_column(gui::game_list_columns::firmware);
 	add_column(gui::game_list_columns::version);
 	add_column(gui::game_list_columns::category);
@@ -246,6 +247,7 @@ QString game_list_frame::get_header_text(int col) const
 	case gui::game_list_columns::icon:       return tr("Icon");
 	case gui::game_list_columns::name:       return tr("Name");
 	case gui::game_list_columns::serial:     return tr("Serial");
+	case gui::game_list_columns::region:     return tr("Region");
 	case gui::game_list_columns::firmware:   return tr("Firmware");
 	case gui::game_list_columns::version:    return tr("Version");
 	case gui::game_list_columns::category:   return tr("Category");
@@ -270,6 +272,7 @@ QString game_list_frame::get_action_text(int col) const
 	case gui::game_list_columns::icon:       return tr("Show Icons");
 	case gui::game_list_columns::name:       return tr("Show Names");
 	case gui::game_list_columns::serial:     return tr("Show Serials");
+	case gui::game_list_columns::region:     return tr("Show Regions");
 	case gui::game_list_columns::firmware:   return tr("Show Firmwares");
 	case gui::game_list_columns::version:    return tr("Show Versions");
 	case gui::game_list_columns::category:   return tr("Show Categories");

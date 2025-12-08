@@ -36,6 +36,7 @@ namespace gui
 		playtime,
 		compat,
 		dir_size,
+		region,
 
 		count
 	};
