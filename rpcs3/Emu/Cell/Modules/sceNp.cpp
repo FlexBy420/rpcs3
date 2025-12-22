@@ -4265,7 +4265,6 @@ error_code sceNpManagerGetEntitlementById(vm::cptr<char> entId, vm::ptr<SceNpEnt
 		return SCE_NP_ERROR_INVALID_ARGUMENT;
 	}
 
-	std::memset(ent.get_ptr(), 0, sizeof(SceNpEntitlement));
 	return CELL_OK;
 }
 
