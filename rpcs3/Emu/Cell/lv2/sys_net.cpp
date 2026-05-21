@@ -1822,6 +1822,14 @@ error_code sys_net_abort(ppu_thread& ppu, s32 type, u64 arg, s32 flags)
 	return CELL_OK;
 }
 
+struct net_infoctl_cmd_6_t
+{
+    be_t<u32> zero;
+    be_t<u32> padding;
+    vm::bptr<char> if_name;
+    be_t<u32> if_index;
+};
+
 struct net_infoctl_cmd_9_t
 {
 	be_t<u32> zero;
@@ -1855,6 +1863,23 @@ error_code sys_net_infoctl(ppu_thread& ppu, s32 cmd, vm::ptr<void> arg)
 		break;
 	}
 	default: break;
+	case 6:
+	case 7:
+	{
+	    auto* info = vm::static_ptr_cast<net_infoctl_cmd_6_t>(arg).get_ptr();
+	    if (!info)
+	        return -SYS_NET_EINVAL;
+
+	    auto& nph = g_fxo->get<named_thread<np::np_handler>>();
+
+	    const u32 local_ip = nph.get_local_ip_addr();
+	    const u32 netmask  = 0xFFFFFF00;
+
+	    info->zero     = 0;
+	    sys_net.notice("sys_net_infoctl(cmd=%d): local_ip=%s", 
+	        cmd, np::ip_to_string(local_ip));
+	    break;
+	}
 	}
 
 	return CELL_OK;
