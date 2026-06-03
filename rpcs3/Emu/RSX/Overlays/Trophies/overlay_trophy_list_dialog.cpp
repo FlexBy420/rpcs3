@@ -3,7 +3,6 @@
 #include "overlay_trophy_list_dialog.h"
 #include "Emu/Cell/Modules/sceNpTrophy.h"
 #include "Emu/NP/rpcn_config.h"
-#include "Emu/NP/np_handler.h"
 #include "Emu/System.h"
 #include "Emu/VFS.h"
 
@@ -349,8 +348,7 @@ namespace rsx
 					return;
 				}
 
-				auto& np = g_fxo->get<np::np_handler>();
-				std::vector<std::pair<s32, u64>> srv_trophies = np.rpcn_trophy_sync(comm_id, local_unlocked);
+				std::vector<std::pair<s32, u64>> srv_trophies = rpcn->sync_trophies(comm_id, local_unlocked);
 
 				if (!srv_trophies.empty())
 				{
