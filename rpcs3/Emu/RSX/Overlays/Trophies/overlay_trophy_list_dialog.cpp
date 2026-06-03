@@ -286,6 +286,10 @@ namespace rsx
 			}
 
 			m_sync_status = 1; // syncing
+
+			// Capture what we need for the thread — avoid capturing `this` for safety
+			// since the dialog may in theory be closed, but in practice the thread is
+			// short-lived and the dialog blocks until closed.
 			const std::string trop_name = m_trop_name;
 			atomic_t<u8>* sync_status = &m_sync_status;
 			atomic_t<bool>* list_dirty = &m_list_dirty;
@@ -298,7 +302,7 @@ namespace rsx
 				{
 					const auto& n = trop_name;
 					std::memcpy(comm_id.data, n.c_str(), COMMUNICATION_ID_COMID_COMPONENT_SIZE);
-					comm_id.term = '\0';
+					comm_id.data[COMMUNICATION_ID_COMID_COMPONENT_SIZE] = '\0'; // null-terminate the 9-char comid
 					comm_id.num = static_cast<u8>(std::atoi(n.c_str() + COMMUNICATION_ID_COMID_COMPONENT_SIZE + 1));
 				}
 				else
@@ -360,7 +364,7 @@ namespace rsx
 						{
 							if (tid >= 0 && tid < static_cast<s32>(count) && !tropusr->GetTrophyUnlockState(tid))
 							{
-								tropusr->UnlockTrophy(tid, ts, ts);
+								(void)tropusr->UnlockTrophy(tid, ts, ts);
 								changed = true;
 							}
 						}
@@ -370,6 +374,8 @@ namespace rsx
 							if (!tropusr->Save(tropusr_vfs_path))
 								rsx_log.error("Trophy sync: failed to save TROPUSR after sync for %s", trop_name);
 
+							// Reload the in-memory trophy data and redraw the list
+							// We signal list_dirty so get_compiled() calls reload() on the render thread
 							*list_dirty = true;
 						}
 					}
@@ -460,6 +466,7 @@ namespace rsx
 		{
 			ensure(m_trophy_data);
 
+			// If sync updated TROPUSR on disk, reload it into m_trophy_data before rendering
 			if (!m_trop_name.empty())
 			{
 				const std::string tropusr_path = "/dev_hdd0/home/" + Emu.GetUsr() + "/trophy/" + m_trop_name + "/TROPUSR.DAT";
