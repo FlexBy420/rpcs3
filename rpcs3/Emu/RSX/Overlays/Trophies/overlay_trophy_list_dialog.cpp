@@ -112,10 +112,10 @@ namespace rsx
 			m_show_hidden_trophies_button->set_font("Arial", 16);
 
 			m_sync_trophies_button = std::make_unique<image_button>();
-			m_sync_trophies_button->set_text("Sync Trophies");
+			m_sync_trophies_button->set_text(localized_string_id::HOME_MENU_TROPHY_SYNC_TROPHIES);
 			m_sync_trophies_button->set_image_resource(resource_config::standard_image_resource::triangle);
 			m_sync_trophies_button->set_size(120, 30);
-			m_sync_trophies_button->set_pos(330, trophy_list_y + trophy_list_h + 20);
+			m_sync_trophies_button->set_pos(480, trophy_list_y + trophy_list_h + 20);
 			m_sync_trophies_button->set_font("Arial", 16);
 
 			fade_animation.duration_sec = 0.15f;
@@ -208,10 +208,10 @@ namespace rsx
 			// Update sync button label based on current sync state
 			switch (m_sync_status.load())
 			{
-			case 1: m_sync_trophies_button->set_text("Syncing..."); break;
-			case 2: m_sync_trophies_button->set_text("Synced!"); break;
-			case 3: m_sync_trophies_button->set_text("Sync Failed"); break;
-			default: m_sync_trophies_button->set_text("Sync Trophies"); break;
+			case 1: m_sync_trophies_button->set_text(localized_string_id::HOME_MENU_TROPHY_SYNCING_TROPHIES); break;
+			case 2: m_sync_trophies_button->set_text(localized_string_id::HOME_MENU_TROPHY_SYNC_SUCCESS); break;
+			case 3: m_sync_trophies_button->set_text(localized_string_id::HOME_MENU_TROPHY_SYNC_FAILED); break;
+			default: m_sync_trophies_button->set_text(localized_string_id::HOME_MENU_TROPHY_SYNC_TROPHIES); break;
 			}
 
 			compiled_resource result;
@@ -286,22 +286,17 @@ namespace rsx
 
 			m_sync_status = 1; // syncing
 
-			// Capture what we need for the thread — avoid capturing `this` for safety
-			// since the dialog may in theory be closed, but in practice the thread is
-			// short-lived and the dialog blocks until closed.
 			const std::string trop_name = m_trop_name;
 			atomic_t<u8>* sync_status = &m_sync_status;
 			atomic_t<bool>* list_dirty = &m_list_dirty;
 
-			// Build the communication ID from the trophy folder name (NPWR#####_##)
 			SceNpCommunicationId comm_id{};
 			{
-				// trop_name format: "NPWR#####_##"  (12 chars: 9 comid + '_' + 2 subid)
 				if (trop_name.size() >= COMMUNICATION_ID_SIZE)
 				{
 					const auto& n = trop_name;
 					std::memcpy(comm_id.data, n.c_str(), COMMUNICATION_ID_COMID_COMPONENT_SIZE);
-					comm_id.data[COMMUNICATION_ID_COMID_COMPONENT_SIZE] = '\0'; // null-terminate the 9-char comid
+					comm_id.data[COMMUNICATION_ID_COMID_COMPONENT_SIZE] = '\0';
 					comm_id.num = static_cast<u8>(std::atoi(n.c_str() + COMMUNICATION_ID_COMID_COMPONENT_SIZE + 1));
 				}
 				else
@@ -312,8 +307,6 @@ namespace rsx
 				}
 			}
 
-			// Gather locally unlocked trophy IDs (timestamps are 0 for overlay-initiated syncs;
-			// the server uses its own stored timestamp if it already has the trophy)
 			const u32 trophy_count = m_trophy_data->trop_usr->GetTrophiesCount();
 			std::vector<std::pair<s32, u64>> local_unlocked;
 			local_unlocked.reserve(trophy_count);
@@ -326,8 +319,6 @@ namespace rsx
 			const std::string tropusr_vfs_path = "/dev_hdd0/home/" + Emu.GetUsr() + "/trophy/" + trop_name + "/TROPUSR.DAT";
 			const std::string tropconf_vfs_path = "/dev_hdd0/home/" + Emu.GetUsr() + "/trophy/" + trop_name + "/TROPCONF.SFM";
 
-			// Perform the blocking network call on a detached worker thread so the
-			// overlay render loop is not stalled.
 			std::thread([=, local_unlocked = std::move(local_unlocked)]() mutable
 			{
 				g_cfg_rpcn.load();
@@ -352,7 +343,6 @@ namespace rsx
 
 				if (!srv_trophies.empty())
 				{
-					// Load a fresh copy of TROPUSR to apply server-side trophies
 					auto tropusr = std::make_unique<TROPUSRLoader>();
 					if (tropusr->Load(tropusr_vfs_path, tropconf_vfs_path).success)
 					{
@@ -372,8 +362,6 @@ namespace rsx
 							if (!tropusr->Save(tropusr_vfs_path))
 								rsx_log.error("Trophy sync: failed to save TROPUSR after sync for %s", trop_name);
 
-							// Reload the in-memory trophy data and redraw the list
-							// We signal list_dirty so get_compiled() calls reload() on the render thread
 							*list_dirty = true;
 						}
 					}
@@ -464,7 +452,6 @@ namespace rsx
 		{
 			ensure(m_trophy_data);
 
-			// If sync updated TROPUSR on disk, reload it into m_trophy_data before rendering
 			if (!m_trop_name.empty())
 			{
 				const std::string tropusr_path = "/dev_hdd0/home/" + Emu.GetUsr() + "/trophy/" + m_trop_name + "/TROPUSR.DAT";
