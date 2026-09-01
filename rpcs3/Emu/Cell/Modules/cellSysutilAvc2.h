@@ -300,3 +300,7 @@ struct CellSysutilAvc2StreamingTarget
 		CellSysutilAvc2MemberIpAndPortList ip_and_port_list;
 	};
 };
+
+// Mixes decoded AV Chat2 audio into the normal RPCS3 output path. This is a
+// host-only helper and is not exported to the emulated process.
+void cellSysutilAvc2MixVoice(f32* out_buffer, u32 sample_count, u32 channel_count, f32 master_volume);
