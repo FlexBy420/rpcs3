@@ -491,6 +491,11 @@ public:
 		max_players = players;
 		max_speakers = speakers;
 		mic_out_stream_sharing = mic_sharing;
+		logged_first_capture.store(false);
+		logged_first_send.store(false);
+		logged_first_receive.store(false);
+		logged_first_mix.store(false);
+		logged_dtx_warning.store(false);
 		wake_up();
 	}
 
@@ -507,6 +512,11 @@ public:
 		capture_pending.clear();
 		output_audio.discard();
 		shared_mic_audio.discard();
+		logged_first_capture.store(false);
+		logged_first_send.store(false);
+		logged_first_receive.store(false);
+		logged_first_mix.store(false);
+		logged_dtx_warning.store(false);
 		close_microphone_nl();
 	}
 
@@ -664,6 +674,11 @@ public:
 			return;
 		}
 
+		if (!logged_first_mix.exchange(true))
+		{
+			cellSysutilAvc2.notice("AV Chat2 mixed the first received voice frame into cellAudio");
+		}
+
 		const f32 gain = speaker_volume.load() * master_volume;
 		const u32 valid_samples = ::narrow<u32>(read / sizeof(f32));
 		for (u32 i = 0; i < valid_samples; i++)
@@ -695,6 +710,11 @@ private:
 	atomic_t<u32> wakey = 0;
 	atomic_t<bool> speaker_muting = false;
 	atomic_t<f32> speaker_volume = 40.0f;
+	atomic_t<bool> logged_first_capture = false;
+	atomic_t<bool> logged_first_send = false;
+	atomic_t<bool> logged_first_receive = false;
+	atomic_t<bool> logged_first_mix = false;
+	atomic_t<bool> logged_dtx_warning = false;
 	avc2_ring_buffer output_audio;
 	avc2_ring_buffer shared_mic_audio;
 
@@ -726,6 +746,7 @@ private:
 	steady_clock::time_point last_status_send{};
 	steady_clock::time_point last_member_refresh{};
 	steady_clock::time_point local_last_event{};
+	steady_clock::time_point last_no_peer_warning{};
 	bool local_talking = false;
 
 	void wake_up()
@@ -855,16 +876,28 @@ private:
 			std::copy_n(capture_pending.begin(), avc2_frame_samples, frame.begin());
 			capture_pending.erase(capture_pending.begin(), capture_pending.begin() + avc2_frame_samples);
 			const u32 level = signal_level(frame);
+			if (!logged_first_capture.exchange(true))
+			{
+				cellSysutilAvc2.notice("AV Chat2 captured the first microphone frame (level=%u)", level);
+			}
 			maybe_emit_voice_event_nl(local_member_id, level, local_talking, local_last_event);
 
 			if (joined && !voice_muting && (!voice_dtx || level >= 2))
 			{
-				send_audio_frame_nl(frame, outgoing_sequence++);
+				if (!send_audio_frame_nl(frame, outgoing_sequence++) && steady_clock::now() - last_no_peer_warning >= 5s)
+				{
+					cellSysutilAvc2.warning("AV Chat2 captured voice but has no active signaling peer to send it to");
+					last_no_peer_warning = steady_clock::now();
+				}
+			}
+			else if (joined && !voice_muting && voice_dtx && level < 2 && !logged_dtx_warning.exchange(true))
+			{
+				cellSysutilAvc2.warning("AV Chat2 DTX suppressed microphone frames because the detected level is %u", level);
 			}
 		}
 	}
 
-	void send_audio_frame_nl(const std::array<s16, avc2_frame_samples>& pcm, u16 sequence)
+	u32 send_audio_frame_nl(const std::array<s16, avc2_frame_samples>& pcm, u16 sequence)
 	{
 		const avc2_encoded_frame encoded = encode_frame(pcm);
 		std::vector<u8> packet;
@@ -880,11 +913,17 @@ private:
 		append_le(packet, static_cast<u16>(avc2_frame_samples));
 		packet.insert(packet.end(), encoded.data.begin(), encoded.data.end());
 
-		send_packet_to_members_nl(packet);
+		u32 sent = send_packet_to_members_nl(packet);
 		if (voice_fec)
 		{
-			send_packet_to_members_nl(packet);
+			sent += send_packet_to_members_nl(packet);
 		}
+
+		if (sent && !logged_first_send.exchange(true))
+		{
+			cellSysutilAvc2.notice("AV Chat2 sent the first voice frame (room=%llu, member=%u, datagrams=%u)", room_id, local_member_id, sent);
+		}
+		return sent;
 	}
 
 	void send_mic_status_nl()
@@ -914,13 +953,14 @@ private:
 		}
 	}
 
-	void send_packet_to_members_nl(const std::vector<u8>& payload)
+	u32 send_packet_to_members_nl(const std::vector<u8>& payload)
 	{
 		if (!joined)
 		{
-			return;
+			return 0;
 		}
 
+		u32 sent = 0;
 		auto& nph = g_fxo->get<named_thread<np::np_handler>>();
 		auto& sigh = g_fxo->get<named_thread<signaling_handler>>();
 		for (const u16 member_id : members)
@@ -959,13 +999,14 @@ private:
 			{
 				auto& translator = g_fxo->get<np::ip_address_translator>();
 				const auto address6 = translator.get_ipv6_sockaddr(destination.sin_addr.s_addr, destination.sin_port);
-				send_packet_from_p2p_port_ipv6(packet, address6);
+				sent += send_packet_from_p2p_port_ipv6(packet, address6);
 			}
 			else
 			{
-				send_packet_from_p2p_port_ipv4(packet, destination);
+				sent += send_packet_from_p2p_port_ipv4(packet, destination);
 			}
 		}
+		return sent;
 	}
 
 	void process_network_nl()
@@ -986,10 +1027,13 @@ private:
 				continue;
 			}
 
+			auto& nph = g_fxo->get<named_thread<np::np_handler>>();
+			const auto [npid_error, npid] = nph.local_get_npid(room_id, member_id);
 			auto& sigh = g_fxo->get<named_thread<signaling_handler>>();
-			const auto conn_id = sigh.get_conn_id_from_addr(message.src_addr, message.src_port);
+			const auto conn_id = npid_error == CELL_OK && npid ? sigh.get_conn_id_from_npid(*npid) : std::nullopt;
 			const auto info = conn_id ? sigh.get_sig_infos(*conn_id) : std::nullopt;
-			if (!info || info->room_id != room_id || info->member_id != member_id || !members.contains(member_id))
+			if (!info || info->room_id != room_id || info->member_id != member_id || info->addr != message.src_addr ||
+				info->port != message.src_port || !members.contains(member_id))
 			{
 				continue;
 			}
@@ -1034,6 +1078,10 @@ private:
 			if (!peer.frames.contains(sequence))
 			{
 				peer.frames.emplace(sequence, decode_frame(predictor, step_index, message.data.data() + encoded_offset, message.data.size() - encoded_offset));
+				if (!logged_first_receive.exchange(true))
+				{
+					cellSysutilAvc2.notice("AV Chat2 received the first voice frame (room=%llu, member=%u)", room_id, member_id);
+				}
 			}
 			while (peer.frames.size() > 50)
 			{
