@@ -110,6 +110,7 @@ trophy_manager_dialog::trophy_manager_dialog(std::shared_ptr<gui_settings> gui_s
 	m_game_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	m_game_table->setColumnCount(static_cast<int>(gui::trophy_game_list_columns::count));
 	m_game_table->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
+	m_game_table->horizontalHeader()->setSectionsMovable(true);
 	m_game_table->horizontalHeader()->setStretchLastSection(false);
 	m_game_table->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
 	m_game_table->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -149,6 +150,7 @@ trophy_manager_dialog::trophy_manager_dialog(std::shared_ptr<gui_settings> gui_s
 	m_trophy_table->setEditTriggers(QAbstractItemView::NoEditTriggers);
 	m_trophy_table->setColumnCount(static_cast<int>(gui::trophy_list_columns::count));
 	m_trophy_table->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
+	m_trophy_table->horizontalHeader()->setSectionsMovable(true);
 	m_trophy_table->horizontalHeader()->setStretchLastSection(true);
 	m_trophy_table->horizontalHeader()->setSectionResizeMode(static_cast<int>(gui::trophy_list_columns::icon), QHeaderView::Fixed);
 	m_trophy_table->verticalHeader()->setVisible(false);
@@ -1072,6 +1074,9 @@ void trophy_manager_dialog::RepaintUI(bool restore_layout)
 		//m_trophy_table->horizontalHeader()->resizeSections(QHeaderView::ResizeMode::ResizeToContents);
 	}
 
+	m_game_table->horizontalHeader()->setSectionsMovable(true);
+	m_trophy_table->horizontalHeader()->setSectionsMovable(true);
+
 	if (restore_layout)
 	{
 		// Make sure the actions and the headers are synced
@@ -1097,6 +1102,9 @@ void trophy_manager_dialog::HandleRepaintUiRequest()
 
 	m_game_table->horizontalHeader()->restoreState(game_table_state);
 	m_trophy_table->horizontalHeader()->restoreState(trophy_table_state);
+
+	m_game_table->horizontalHeader()->setSectionsMovable(true);
+	m_trophy_table->horizontalHeader()->setSectionsMovable(true);
 
 	// Make sure the actions and the headers are synced
 	m_game_table->sync_header_actions(m_game_column_acts, [this](int col) { return m_gui_settings->GetTrophyGamelistColVisibility(static_cast<gui::trophy_game_list_columns>(col)); });
