@@ -16,6 +16,7 @@
 
 class gui_settings;
 class PadHandlerBase;
+class controller_live_preview;
 
 namespace Ui
 {
@@ -189,6 +190,10 @@ private:
 
 	// Input timer. Updates the GUI with input values
 	QTimer m_timer_input;
+	controller_live_preview* m_controller_live_preview = nullptr;
+	bool m_preview_pressure_button_down = false;
+	bool m_preview_pressure_toggled = false;
+	std::map<std::string, u16> m_keyboard_preview_inputs;
 	std::mutex m_input_mutex;
 	struct input_callback_data
 	{
@@ -215,6 +220,7 @@ private:
 
 	void start_input_thread();
 	void pause_input_thread();
+	void UpdateControllerLivePreview(const std::map<std::string, u16>& active_inputs, bool connected, const pad_preview_values* raw_preview = nullptr);
 
 	std::pair<QStringList, QString> get_config_files();
 
@@ -276,6 +282,8 @@ protected:
 
 	/** Handle keyboard handler input */
 	void keyPressEvent(QKeyEvent* keyEvent) override;
+	void keyReleaseEvent(QKeyEvent* keyEvent) override;
+	void mousePressEvent(QMouseEvent* event) override;
 	void mouseReleaseEvent(QMouseEvent* event) override;
 	void mouseMoveEvent(QMouseEvent* event) override;
 	void wheelEvent(QWheelEvent* event) override;

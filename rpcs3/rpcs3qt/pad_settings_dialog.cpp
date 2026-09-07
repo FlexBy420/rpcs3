@@ -3,11 +3,13 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QInputDialog>
+#include <QKeyEvent>
 #include <QMessageBox>
-#include <QSvgRenderer>
+#include <QMouseEvent>
 
 #include "qt_utils.h"
 #include "pad_settings_dialog.h"
+#include "controller_live_preview.h"
 #include "pad_led_settings_dialog.h"
 #include "pad_motion_settings_dialog.h"
 #include "ui_pad_settings_dialog.h"
@@ -24,6 +26,7 @@
 #include "Input/product_info.h"
 #include "Input/keyboard_pad_handler.h"
 
+#include <cmath>
 #include <thread>
 
 LOG_CHANNEL(cfg_log, "CFG");
@@ -224,15 +227,13 @@ pad_settings_dialog::pad_settings_dialog(std::shared_ptr<gui_settings> gui_setti
 	// Initialize tooltips
 	SubscribeTooltips();
 
-	// Repaint controller image
-	QSvgRenderer renderer(QStringLiteral(":/Icons/DualShock_3.svg"));
-	QPixmap controller_pixmap(renderer.defaultSize() * 10);
-	controller_pixmap.fill(Qt::transparent);
-	QPainter painter(&controller_pixmap);
-	painter.setRenderHints(QPainter::TextAntialiasing | QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
-	renderer.render(&painter, controller_pixmap.rect());
+	// Live DualShock 3 preview. It renders the controller itself so dynamic parts can physically move/depress
 	const QColor color = gui::utils::get_foreground_color();
-	ui->l_controller->setPixmap(gui::utils::get_colorized_pixmap(controller_pixmap, QColor(), gui::utils::get_label_color("l_controller", color, color), false, true));
+	const QColor controller_color = gui::utils::get_label_color("l_controller", color, color);
+	ui->l_controller->clear();
+	m_controller_live_preview = new controller_live_preview(ui->l_controller, controller_color);
+	m_controller_live_preview->show();
+	m_controller_live_preview->raise();
 
 	// Show default widgets first in order to calculate the required size for the scroll area (see pad_settings_dialog::ResizeDialog)
 	ui->left_stack->setCurrentIndex(0);
@@ -546,11 +547,32 @@ void pad_settings_dialog::InitButtons()
 		{
 			// Disable Button Remapping
 			update_preview(data.pad_name, false, 0, 0, 0, 0, 0, 0, 0, data.capabilities);
+			UpdateControllerLivePreview({}, false);
 			return;
 		}
 
 		// Enable Button Remapping
 		update_preview(data.pad_name, true, data.battery_level, data.preview_values[0], data.preview_values[1], data.preview_values[2], data.preview_values[3], data.preview_values[4], data.preview_values[5], data.capabilities);
+
+		// Gather the raw inputs reported by the current backend
+		std::map<std::string, u16> active_inputs;
+		for (const input_callback_data::input_values& values : data.values)
+		{
+			for (const auto& [key, value] : values.buttons)
+			{
+				u16& current = active_inputs[key];
+				current = std::max(current, value);
+			}
+
+			for (const auto& [key, value] : values.sticks)
+			{
+				if (key.empty() || value == 0) continue;
+				u16& current = active_inputs[key];
+				current = std::max(current, value);
+			}
+		}
+
+		UpdateControllerLivePreview(active_inputs, true, &data.preview_values);
 
 		static Timer s_first_input_timer = {};
 		static std::map<std::string, u16> s_pressed_buttons;
@@ -997,8 +1019,142 @@ void pad_settings_dialog::RepaintPreviewLabel(QLabel* label, int deadzone, int a
 	label->setPixmap(pixmap);
 }
 
+void pad_settings_dialog::UpdateControllerLivePreview(const std::map<std::string, u16>& active_inputs, bool connected, const pad_preview_values* raw_preview)
+{
+	if (!m_controller_live_preview)
+	{
+		return;
+	}
+
+	if (!connected)
+	{
+		m_controller_live_preview->clear_input();
+		m_preview_pressure_button_down = false;
+		m_preview_pressure_toggled = false;
+		return;
+	}
+
+	const auto binding_strength = [this, &active_inputs](button_ids id) -> int
+	{
+		const auto entry = m_cfg_entries.find(id);
+		if (entry == m_cfg_entries.end())
+		{
+			return 0;
+		}
+
+		u16 strongest = 0;
+		for (const pad::combo& combo : cfg_pad::get_combos(entry->second.button_string()))
+		{
+			u16 combo_strength = 255;
+			bool combo_active = !combo.buttons().empty();
+
+			for (const std::string& key : combo.buttons())
+			{
+				const auto pressed = active_inputs.find(key);
+				if (pressed == active_inputs.end() || pressed->second == 0)
+				{
+					combo_active = false;
+					break;
+				}
+
+				combo_strength = std::min<u16>(combo_strength, std::min<u16>(pressed->second, 255));
+			}
+
+			if (combo_active)
+			{
+				strongest = std::max(strongest, combo_strength);
+			}
+		}
+
+		return strongest;
+	};
+
+	controller_live_preview::state preview_state;
+	preview_state.connected = true;
+	preview_state.stick_max = 255;
+
+	// Derive the emulated stick state from the actual configured bindings
+	preview_state.lx = binding_strength(button_ids::id_pad_lstick_right) - binding_strength(button_ids::id_pad_lstick_left);
+	preview_state.ly = binding_strength(button_ids::id_pad_lstick_up) - binding_strength(button_ids::id_pad_lstick_down);
+	preview_state.rx = binding_strength(button_ids::id_pad_rstick_right) - binding_strength(button_ids::id_pad_rstick_left);
+	preview_state.ry = binding_strength(button_ids::id_pad_rstick_up) - binding_strength(button_ids::id_pad_rstick_down);
+
+	if (raw_preview && ((*raw_preview)[2] != 0 || (*raw_preview)[3] != 0 || (*raw_preview)[4] != 0 || (*raw_preview)[5] != 0))
+	{
+		preview_state.lx = (*raw_preview)[2];
+		preview_state.ly = (*raw_preview)[3];
+		preview_state.rx = (*raw_preview)[4];
+		preview_state.ry = (*raw_preview)[5];
+	}
+
+	const cfg_pad& pad_cfg = GetPlayerConfig();
+	const bool pressure_button_down = binding_strength(button_ids::id_pressure_intensity) > 0;
+	bool pressure_mode_active = pressure_button_down;
+
+	if (pad_cfg.pressure_intensity_toggle_mode.get())
+	{
+		if (pressure_button_down && !m_preview_pressure_button_down)
+		{
+			m_preview_pressure_toggled = !m_preview_pressure_toggled;
+		}
+		pressure_mode_active = m_preview_pressure_toggled;
+	}
+	else
+	{
+		m_preview_pressure_toggled = false;
+	}
+
+	m_preview_pressure_button_down = pressure_button_down;
+	const int configured_pressure = std::clamp(static_cast<int>(std::lround(255.0 * pad_cfg.pressure_intensity.get() / 100.0)), 0, 255);
+
+	const auto set_button = [&preview_state, &binding_strength, pressure_mode_active, configured_pressure](controller_live_preview::button button, button_ids id, bool pressure_sensitive = false)
+	{
+		int value = binding_strength(id);
+		if (pressure_sensitive && pressure_mode_active && value > 0)
+		{
+			value = configured_pressure;
+		}
+		preview_state.buttons[static_cast<int>(button)] = value;
+	};
+
+	set_button(controller_live_preview::button::dpad_left,  button_ids::id_pad_left, true);
+	set_button(controller_live_preview::button::dpad_down,  button_ids::id_pad_down, true);
+	set_button(controller_live_preview::button::dpad_right, button_ids::id_pad_right, true);
+	set_button(controller_live_preview::button::dpad_up,    button_ids::id_pad_up, true);
+	set_button(controller_live_preview::button::l1, button_ids::id_pad_l1, true);
+	set_button(controller_live_preview::button::l2, button_ids::id_pad_l2, true);
+	set_button(controller_live_preview::button::l3, button_ids::id_pad_l3);
+	set_button(controller_live_preview::button::select, button_ids::id_pad_select);
+	set_button(controller_live_preview::button::start, button_ids::id_pad_start);
+	set_button(controller_live_preview::button::ps, button_ids::id_pad_ps);
+	set_button(controller_live_preview::button::r1, button_ids::id_pad_r1, true);
+	set_button(controller_live_preview::button::r2, button_ids::id_pad_r2, true);
+	set_button(controller_live_preview::button::r3, button_ids::id_pad_r3);
+	set_button(controller_live_preview::button::square, button_ids::id_pad_square, true);
+	set_button(controller_live_preview::button::cross, button_ids::id_pad_cross, true);
+	set_button(controller_live_preview::button::circle, button_ids::id_pad_circle, true);
+	set_button(controller_live_preview::button::triangle, button_ids::id_pad_triangle, true);
+
+	if (raw_preview && !pressure_mode_active)
+	{
+		preview_state.buttons[static_cast<int>(controller_live_preview::button::l2)] = std::max(preview_state.buttons[static_cast<int>(controller_live_preview::button::l2)], std::clamp((*raw_preview)[0], 0, 255));
+		preview_state.buttons[static_cast<int>(controller_live_preview::button::r2)] = std::max(preview_state.buttons[static_cast<int>(controller_live_preview::button::r2)], std::clamp((*raw_preview)[1], 0, 255));
+	}
+
+	m_controller_live_preview->set_state(preview_state);
+}
+
 void pad_settings_dialog::keyPressEvent(QKeyEvent* keyEvent)
 {
+	if (m_handler && m_handler->m_type == pad_handler::keyboard && !keyEvent->isAutoRepeat())
+	{
+		const std::string key = keyboard_pad_handler::GetKeyName(keyEvent, false);
+		if (!key.empty())
+		{
+			m_keyboard_preview_inputs[key] = 255;
+			UpdateControllerLivePreview(m_keyboard_preview_inputs, true);
+		}
+	}
 	if (m_button_id == button_ids::id_pad_begin)
 	{
 		// We are not remapping a button, so pass the event to the base class.
@@ -1029,8 +1185,47 @@ void pad_settings_dialog::keyPressEvent(QKeyEvent* keyEvent)
 	ReactivateButtons();
 }
 
+void pad_settings_dialog::keyReleaseEvent(QKeyEvent* keyEvent)
+{
+	if (m_handler && m_handler->m_type == pad_handler::keyboard && !keyEvent->isAutoRepeat())
+	{
+		const std::string key = keyboard_pad_handler::GetKeyName(keyEvent, false);
+		if (!key.empty())
+		{
+			m_keyboard_preview_inputs.erase(key);
+			UpdateControllerLivePreview(m_keyboard_preview_inputs, true);
+		}
+	}
+
+	QDialog::keyReleaseEvent(keyEvent);
+}
+
+void pad_settings_dialog::mousePressEvent(QMouseEvent* event)
+{
+	if (m_handler && m_handler->m_type == pad_handler::keyboard)
+	{
+		const std::string key = keyboard_pad_handler::GetMouseName(event);
+		if (!key.empty())
+		{
+			m_keyboard_preview_inputs[key] = 255;
+			UpdateControllerLivePreview(m_keyboard_preview_inputs, true);
+		}
+	}
+
+	QDialog::mousePressEvent(event);
+}
+
 void pad_settings_dialog::mouseReleaseEvent(QMouseEvent* event)
 {
+	if (m_handler && m_handler->m_type == pad_handler::keyboard)
+	{
+		const std::string key = keyboard_pad_handler::GetMouseName(event);
+		if (!key.empty())
+		{
+			m_keyboard_preview_inputs.erase(key);
+			UpdateControllerLivePreview(m_keyboard_preview_inputs, true);
+		}
+	}
 	if (m_button_id == button_ids::id_pad_begin)
 	{
 		// We are not remapping a button, so pass the event to the base class.
@@ -1518,6 +1713,8 @@ void pad_settings_dialog::ChangeHandler()
 {
 	// Pause input thread. This means we don't have to lock the handler mutex here.
 	pause_input_thread();
+	m_keyboard_preview_inputs.clear();
+	UpdateControllerLivePreview({}, false);
 
 	bool force_enable = false; // enable configs even with disconnected devices
 	const u32 player = GetPlayerIndex();
