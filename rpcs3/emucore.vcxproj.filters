@@ -1420,6 +1420,18 @@
     <ClCompile Include="Loader\ISO.cpp">
       <Filter>Loader</Filter>
     </ClCompile>
+    <ClCompile Include="Loader\ZAR.cpp">
+      <Filter>Loader</Filter>
+    </ClCompile>
+    <ClCompile Include="..\3rdparty\zarchive\zarchive\src\zarchivereader.cpp">
+      <Filter>Loader</Filter>
+    </ClCompile>
+    <ClCompile Include="..\3rdparty\zarchive\zarchive\src\zarchivewriter.cpp">
+      <Filter>Loader</Filter>
+    </ClCompile>
+    <ClCompile Include="..\3rdparty\zarchive\zarchive\src\sha_256.c">
+      <Filter>Loader</Filter>
+    </ClCompile>
     <ClCompile Include="Loader\iso_cache.cpp">
       <Filter>Loader</Filter>
     </ClCompile>
@@ -2918,6 +2930,9 @@
       <Filter>Emu\NP</Filter>
     </ClInclude>
     <ClInclude Include="Loader\ISO.h">
+      <Filter>Loader</Filter>
+    </ClInclude>
+    <ClInclude Include="Loader\ZAR.h">
       <Filter>Loader</Filter>
     </ClInclude>
     <ClInclude Include="Loader\iso_cache.h">
