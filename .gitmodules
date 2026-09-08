@@ -115,5 +115,4 @@
 
 [submodule "3rdparty/zarchive/zarchive"]
 	path = 3rdparty/zarchive/zarchive
-	url = ../../Exzap/ZArchive.git
-	ignore = dirty
+	url = https://github.com/Exzap/ZArchive.git
