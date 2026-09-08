@@ -188,6 +188,7 @@ public:
 	bool is_zar() const { return static_cast<bool>(m_zar); }
 	bool is_zar_iso() const;
 	bool is_zar_jb() const;
+	const char* source_description() const;
 	fs::file open_backing_file() const;
 	fs::file open_embedded_key() const;
 	const std::string& embedded_key_name() const;
@@ -226,6 +227,7 @@ public:
 	~iso_device() override = default;
 
 	const std::string& get_loaded_iso() const { return m_path; }
+	const char* get_source_description() const { return m_archive.source_description(); }
 
 	bool stat(const std::string& path, fs::stat_t& info) override;
 	bool statfs(const std::string& path, fs::device_stat& info) override;

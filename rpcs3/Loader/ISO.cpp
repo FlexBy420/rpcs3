@@ -1289,6 +1289,24 @@ bool iso_archive::is_zar_jb() const
 	return m_zar && m_zar->is_jb_layout();
 }
 
+const char* iso_archive::source_description() const
+{
+	if (is_zar_jb())
+	{
+		return "ZAR (JB)";
+	}
+
+	const iso_encryption_type enc_type = m_dec ? m_dec->get_enc_type() : iso_encryption_type::NONE;
+	const bool encrypted = enc_type == iso_encryption_type::REDUMP || enc_type == iso_encryption_type::ENC_3K3Y;
+
+	if (is_zar_iso())
+	{
+		return encrypted ? "ZAR (Encrypted ISO)" : "ZAR (Decrypted ISO)";
+	}
+
+	return encrypted ? "Encrypted ISO" : "Decrypted ISO";
+}
+
 fs::file iso_archive::open_backing_file() const
 {
 	if (m_zar)
@@ -1827,7 +1845,29 @@ namespace
 		while (!relative.empty() && (relative.back() == '/' || relative.back() == '\\'))
 			relative.remove_suffix(1);
 
-		out.assign(relative);
+		out.clear();
+		out.reserve(relative.size());
+
+		bool previous_was_delimiter = false;
+		for (const char ch : relative)
+		{
+			const bool is_delimiter = ch == '/' || ch == '\\';
+			if (is_delimiter)
+			{
+				if (!out.empty() && !previous_was_delimiter)
+					out += '/';
+				previous_was_delimiter = true;
+			}
+			else
+			{
+				out += ch;
+				previous_was_delimiter = false;
+			}
+		}
+
+		while (!out.empty() && out.back() == '/')
+			out.pop_back();
+
 		return true;
 	}
 }
@@ -1941,11 +1981,11 @@ std::unique_ptr<fs::dir_base> iso_device::open_dir(const std::string& path)
 
 void load_iso(const std::string& path)
 {
-	sys_log.notice("Loading ISO '%s'", path);
+	auto device = stx::make_shared<iso_device>(path);
 
-	fs::set_virtual_device("iso_overlay_fs_dev", stx::make_shared<iso_device>(path));
-
+	fs::set_virtual_device("iso_overlay_fs_dev", device);
 	vfs::mount("/dev_bdvd/"sv, iso_device::virtual_device_name + "/");
+	sys_log.notice("Loading %s '%s'", device->get_source_description(), path);
 }
 
 void unload_iso()
