@@ -60,6 +60,7 @@ enum class iso_type_status
 };
 
 class iso_archive;
+class zar_disc_container;
 
 // ISO file decryption class
 class iso_file_decryption
@@ -70,9 +71,12 @@ private:
 	std::vector<iso_region_info> m_region_info;
 
 	static iso_type_status get_key(const std::string& key_path, aes_context* aes_ctx = nullptr);
+	static iso_type_status get_key(fs::file& key_file, aes_context* aes_ctx = nullptr);
 	static iso_type_status retrieve_key(iso_archive& archive, std::string& key_path, aes_context& aes_ctx);
 
 public:
+	// Searches for a Redump key next to an image and in the global Redump key directory
+	static iso_type_status find_key(const std::string& image_path, std::string* key_path = nullptr, aes_context* aes_ctx = nullptr);
 	static iso_type_status check_type(const std::string& path, std::string* key_path = nullptr, aes_context* aes_ctx = nullptr);
 
 	iso_encryption_type get_enc_type() const { return m_enc_type; }
@@ -93,6 +97,7 @@ struct iso_fs_metadata
 	s64 time = 0;
 	bool is_directory = false;
 	bool has_multiple_extents = false;
+	u32 archive_node = 0xffffffffu; // Used by direct-file disc containers such as ZArchive JB layout
 	std::vector<iso_extent_info> extents;
 
 	u64 size() const;
@@ -120,6 +125,8 @@ protected:
 public:
 	iso_file(const std::string& path, bs_t<fs::open_mode> mode = fs::read);
 	iso_file(const std::string& path, bs_t<fs::open_mode> mode, const iso_fs_node& node);
+	iso_file(fs::file&& file, const std::string& name);
+	iso_file(fs::file&& file, const std::string& name, const iso_fs_node& node);
 
 	explicit operator bool() const { return m_file.operator bool(); }
 
@@ -143,6 +150,7 @@ private:
 
 public:
 	iso_file_encrypted(const std::string& path, bs_t<fs::open_mode> mode, const iso_fs_node& node, std::shared_ptr<iso_file_decryption> dec);
+	iso_file_encrypted(fs::file&& file, const std::string& name, const iso_fs_node& node, std::shared_ptr<iso_file_decryption> dec);
 
 	u64 read_at(u64 offset, void* buffer, u64 size) override;
 };
@@ -169,6 +177,7 @@ private:
 	void invalidate();
 
 	std::string m_path;
+	std::shared_ptr<zar_disc_container> m_zar;
 	iso_fs_node m_root {};
 	std::shared_ptr<iso_file_decryption> m_dec;
 
@@ -176,6 +185,12 @@ public:
 	iso_archive(const std::string& path);
 
 	const std::string& path() const { return m_path; }
+	bool is_zar() const { return static_cast<bool>(m_zar); }
+	bool is_zar_iso() const;
+	bool is_zar_jb() const;
+	fs::file open_backing_file() const;
+	fs::file open_embedded_key() const;
+	const std::string& embedded_key_name() const;
 	const iso_fs_node& root() const { return m_root; }
 
 	iso_fs_node* retrieve(const std::string& path);
@@ -185,6 +200,9 @@ public:
 
 	std::unique_ptr<fs::file_base> get_iso_file(const std::string& path, bs_t<fs::open_mode> mode, const iso_fs_node& node);
 	std::unique_ptr<fs::file_base> open(const std::string& path);
+	bool stat_zar_jb(const std::string& path, fs::stat_t& info) const;
+	std::unique_ptr<fs::file_base> open_zar_jb_file(const std::string& path, bs_t<fs::open_mode> mode) const;
+	std::unique_ptr<fs::dir_base> open_zar_jb_dir(const std::string& path) const;
 	psf::registry open_psf(const std::string& path);
 
 	friend class iso_file;

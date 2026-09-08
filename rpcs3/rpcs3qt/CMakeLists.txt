@@ -23,6 +23,7 @@ add_library(rpcs3_ui STATIC
     debugger_list.cpp
     downloader.cpp
     dimensions_dialog.cpp
+    disc_compression_manager_dialog.cpp
     _discord_utils.cpp
     emu_settings.cpp
     emu_settings_type.cpp
