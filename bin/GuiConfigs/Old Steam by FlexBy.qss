@@ -26,7 +26,7 @@ QWidget {
     color: #d8ddd1;
     background-color: transparent;
     alternate-background-color: #35402f;
-    font-family: "Tahoma";
+    font-family: "DejaVu Sans";
     selection-color: #f2f4ed;
     selection-background-color: #667756;
 }
@@ -1134,7 +1134,7 @@ QDockWidget::close-button:pressed {
     background-color: transparent;
     font-weight: 600;
     font-size: 8pt;
-    font-family: "Tahoma";
+    font-family: "DejaVu Sans";
 }
 
 #game_list_grid_item[selected="true"] #game_list_grid_item_title_label,
