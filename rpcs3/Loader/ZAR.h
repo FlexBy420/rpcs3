@@ -36,6 +36,7 @@ public:
 	bool is_jb_layout() const { return m_layout == zar_disc_layout::jb; }
 	const std::string& iso_name() const { return m_iso_name; }
 	const std::string& key_name() const { return m_key_name; }
+	s64 source_mtime() const { return m_source_mtime; }
 
 	fs::file open_iso() const;
 	fs::file open_key() const;
@@ -54,7 +55,7 @@ public:
 
 private:
 	zar_disc_container(std::string source_path, std::shared_ptr<ZArchiveReader> reader, zar_disc_layout layout,
-		u32 iso_node, u32 key_node, std::string iso_name, std::string key_name);
+		u32 iso_node, u32 key_node, std::string iso_name, std::string key_name, s64 source_mtime);
 
 	std::string m_source_path;
 	std::shared_ptr<ZArchiveReader> m_reader;
@@ -63,6 +64,7 @@ private:
 	u32 m_key_node = 0xffffffffu;
 	std::string m_iso_name;
 	std::string m_key_name;
+	s64 m_source_mtime = 0;
 };
 
 

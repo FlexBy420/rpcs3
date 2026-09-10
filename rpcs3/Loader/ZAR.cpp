@@ -21,15 +21,24 @@ namespace
 	class zar_file final : public fs::file_base
 	{
 	public:
-		zar_file(std::shared_ptr<ZArchiveReader> reader, ZArchiveNodeHandle node, std::string name)
-			: m_reader(std::move(reader)), m_node(node), m_name(std::move(name))
+		zar_file(std::shared_ptr<ZArchiveReader> reader, ZArchiveNodeHandle node, std::string name, s64 source_mtime)
+			: m_reader(std::move(reader)), m_node(node), m_name(std::move(name)), m_source_mtime(source_mtime)
 		{
 			m_size = m_reader ? m_reader->GetFileSize(m_node) : 0;
 		}
 
 		fs::stat_t get_stat() override
 		{
-			return fs::stat_t{.is_directory = false, .is_symlink = false, .is_writable = false, .size = m_size};
+			return fs::stat_t
+			{
+				.is_directory = false,
+				.is_symlink = false,
+				.is_writable = false,
+				.size = m_size,
+				.atime = m_source_mtime,
+				.mtime = m_source_mtime,
+				.ctime = m_source_mtime,
+			};
 		}
 
 		bool trunc(u64) override
@@ -89,6 +98,7 @@ namespace
 		std::string m_name;
 		u64 m_pos = 0;
 		u64 m_size = 0;
+		s64 m_source_mtime = 0;
 	};
 
 
@@ -202,7 +212,7 @@ namespace
 }
 
 zar_disc_container::zar_disc_container(std::string source_path, std::shared_ptr<ZArchiveReader> reader, zar_disc_layout layout,
-	u32 iso_node, u32 key_node, std::string iso_name, std::string key_name)
+	u32 iso_node, u32 key_node, std::string iso_name, std::string key_name, s64 source_mtime)
 	: m_source_path(std::move(source_path))
 	, m_reader(std::move(reader))
 	, m_layout(layout)
@@ -210,6 +220,7 @@ zar_disc_container::zar_disc_container(std::string source_path, std::shared_ptr<
 	, m_key_node(key_node)
 	, m_iso_name(std::move(iso_name))
 	, m_key_name(std::move(key_name))
+	, m_source_mtime(source_mtime)
 {
 }
 
@@ -233,6 +244,9 @@ std::shared_ptr<zar_disc_container> zar_disc_container::open(const std::string& 
 
 	if (!preflight_zar(path, error))
 		return {};
+
+	fs::stat_t source_stat{};
+	const s64 source_mtime = fs::get_stat(path, source_stat) ? source_stat.mtime : 0;
 
 	std::shared_ptr<ZArchiveReader> reader(ZArchiveReader::OpenFromFile(std::filesystem::path(reinterpret_cast<const char8_t*>(path.c_str()))));
 	if (!reader)
@@ -306,19 +320,19 @@ std::shared_ptr<zar_disc_container> zar_disc_container::open(const std::string& 
 	}
 
 	return std::shared_ptr<zar_disc_container>(new zar_disc_container(path, std::move(reader), has_iso ? zar_disc_layout::iso : zar_disc_layout::jb,
-		has_iso ? iso_node : ZARCHIVE_INVALID_NODE, key_node, has_iso ? iso_name : std::string{}, key_name));
+		has_iso ? iso_node : ZARCHIVE_INVALID_NODE, key_node, has_iso ? iso_name : std::string{}, key_name, source_mtime));
 }
 
 fs::file zar_disc_container::open_iso() const
 {
 	if (!m_reader || m_iso_node == ZARCHIVE_INVALID_NODE) return {};
-	return fs::file(std::make_unique<zar_file>(m_reader, m_iso_node, m_source_path + "::" + m_iso_name));
+	return fs::file(std::make_unique<zar_file>(m_reader, m_iso_node, m_source_path + "::" + m_iso_name, m_source_mtime));
 }
 
 fs::file zar_disc_container::open_key() const
 {
 	if (!m_reader || m_key_node == ZARCHIVE_INVALID_NODE) return {};
-	return fs::file(std::make_unique<zar_file>(m_reader, m_key_node, m_source_path + "::" + m_key_name));
+	return fs::file(std::make_unique<zar_file>(m_reader, m_key_node, m_source_path + "::" + m_key_name, m_source_mtime));
 }
 
 u64 zar_disc_container::iso_size() const
@@ -329,7 +343,7 @@ u64 zar_disc_container::iso_size() const
 fs::file zar_disc_container::open_file(u32 node, const std::string& display_name) const
 {
 	if (!m_reader || node == ZARCHIVE_INVALID_NODE || !m_reader->IsFile(node)) return {};
-	return fs::file(std::make_unique<zar_file>(m_reader, node, m_source_path + "::" + display_name));
+	return fs::file(std::make_unique<zar_file>(m_reader, node, m_source_path + "::" + display_name, m_source_mtime));
 }
 
 
@@ -345,7 +359,7 @@ fs::file zar_disc_container::open_file(const std::string& path) const
 		return {};
 	}
 
-	return fs::file(std::make_unique<zar_file>(m_reader, node, m_source_path + "::" + path));
+	return fs::file(std::make_unique<zar_file>(m_reader, node, m_source_path + "::" + path, m_source_mtime));
 }
 
 std::unique_ptr<fs::dir_base> zar_disc_container::open_dir(const std::string& path) const
@@ -380,6 +394,9 @@ std::unique_ptr<fs::dir_base> zar_disc_container::open_dir(const std::string& pa
 		out.is_symlink = false;
 		out.is_writable = false;
 		out.size = in.isFile ? in.size : ISO_SECTOR_SIZE;
+		out.atime = m_source_mtime;
+		out.mtime = m_source_mtime;
+		out.ctime = m_source_mtime;
 		entries.emplace_back(std::move(out));
 	}
 
@@ -412,6 +429,9 @@ bool zar_disc_container::stat(const std::string& path, fs::stat_t& info) const
 		.is_symlink = false,
 		.is_writable = false,
 		.size = is_file_node ? m_reader->GetFileSize(node) : ISO_SECTOR_SIZE,
+		.atime = m_source_mtime,
+		.mtime = m_source_mtime,
+		.ctime = m_source_mtime,
 	};
 	return true;
 }

@@ -1116,6 +1116,7 @@ namespace
 		{
 			auto pseudo = std::make_unique<iso_fs_node>();
 			pseudo->metadata.name = pseudo_name;
+			pseudo->metadata.time = archive.source_mtime();
 			pseudo->metadata.is_directory = true;
 			pseudo->metadata.extents.push_back({0, ISO_SECTOR_SIZE});
 			parent.children.emplace_back(std::move(pseudo));
@@ -1142,6 +1143,7 @@ namespace
 
 			auto child = std::make_unique<iso_fs_node>();
 			child->metadata.name = entry.name;
+			child->metadata.time = archive.source_mtime();
 			child->metadata.is_directory = entry.is_directory;
 			child->metadata.archive_node = child_handle;
 			if (entry.is_directory)
@@ -1185,6 +1187,7 @@ iso_archive::iso_archive(const std::string& path)
 	if (m_zar && m_zar->is_jb_layout())
 	{
 		m_root.metadata.name = ".";
+		m_root.metadata.time = m_zar->source_mtime();
 		m_root.metadata.is_directory = true;
 		m_root.metadata.extents.push_back({0, ISO_SECTOR_SIZE});
 		m_root.metadata.archive_node = m_zar->lookup("", false, true);
@@ -1864,7 +1867,29 @@ namespace
 		while (!relative.empty() && (relative.back() == '/' || relative.back() == '\\'))
 			relative.remove_suffix(1);
 
-		out.assign(relative);
+		out.clear();
+		out.reserve(relative.size());
+
+		bool previous_was_delimiter = false;
+		for (const char ch : relative)
+		{
+			const bool is_delimiter = ch == '/' || ch == '\\';
+			if (is_delimiter)
+			{
+				if (!out.empty() && !previous_was_delimiter)
+					out += '/';
+				previous_was_delimiter = true;
+			}
+			else
+			{
+				out += ch;
+				previous_was_delimiter = false;
+			}
+		}
+
+		while (!out.empty() && out.back() == '/')
+			out.pop_back();
+
 		return true;
 	}
 }
