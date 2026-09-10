@@ -45,7 +45,9 @@ QWidget#networkTab,
 QWidget#emulatorTab,
 QWidget#debugTab,
 QWidget#cg_disasm,
-QWidget#trophy_manager {
+QWidget#trophy_manager,
+QWidget#log_viewer,
+QWidget#savestate_manager {
     background-color: #46523f;
 }
 
