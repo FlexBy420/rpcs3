@@ -1289,11 +1289,11 @@ bool iso_archive::is_zar_jb() const
 	return m_zar && m_zar->is_jb_layout();
 }
 
-const char* iso_archive::source_description() const
+iso_archive_source_type iso_archive::source_type() const
 {
 	if (is_zar_jb())
 	{
-		return "ZAR (JB)";
+		return iso_archive_source_type::zar_jb;
 	}
 
 	const iso_encryption_type enc_type = m_dec ? m_dec->get_enc_type() : iso_encryption_type::NONE;
@@ -1301,10 +1301,29 @@ const char* iso_archive::source_description() const
 
 	if (is_zar_iso())
 	{
-		return encrypted ? "ZAR (Encrypted ISO)" : "ZAR (Decrypted ISO)";
+		return encrypted ? iso_archive_source_type::zar_encrypted_iso : iso_archive_source_type::zar_decrypted_iso;
 	}
 
-	return encrypted ? "Encrypted ISO" : "Decrypted ISO";
+	return encrypted ? iso_archive_source_type::encrypted_iso : iso_archive_source_type::decrypted_iso;
+}
+
+const char* iso_archive::source_description() const
+{
+	switch (source_type())
+	{
+	case iso_archive_source_type::decrypted_iso:
+		return "Decrypted ISO";
+	case iso_archive_source_type::encrypted_iso:
+		return "Encrypted ISO";
+	case iso_archive_source_type::zar_decrypted_iso:
+		return "ZAR (Decrypted ISO)";
+	case iso_archive_source_type::zar_encrypted_iso:
+		return "ZAR (Encrypted ISO)";
+	case iso_archive_source_type::zar_jb:
+		return "ZAR (JB)";
+	}
+
+	fmt::throw_exception("Unknown ISO archive source type");
 }
 
 fs::file iso_archive::open_backing_file() const
@@ -1845,29 +1864,7 @@ namespace
 		while (!relative.empty() && (relative.back() == '/' || relative.back() == '\\'))
 			relative.remove_suffix(1);
 
-		out.clear();
-		out.reserve(relative.size());
-
-		bool previous_was_delimiter = false;
-		for (const char ch : relative)
-		{
-			const bool is_delimiter = ch == '/' || ch == '\\';
-			if (is_delimiter)
-			{
-				if (!out.empty() && !previous_was_delimiter)
-					out += '/';
-				previous_was_delimiter = true;
-			}
-			else
-			{
-				out += ch;
-				previous_was_delimiter = false;
-			}
-		}
-
-		while (!out.empty() && out.back() == '/')
-			out.pop_back();
-
+		out.assign(relative);
 		return true;
 	}
 }
@@ -1985,6 +1982,7 @@ void load_iso(const std::string& path)
 
 	fs::set_virtual_device("iso_overlay_fs_dev", device);
 	vfs::mount("/dev_bdvd/"sv, iso_device::virtual_device_name + "/");
+
 	sys_log.notice("Loading %s '%s'", device->get_source_description(), path);
 }
 

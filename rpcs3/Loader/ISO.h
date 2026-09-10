@@ -59,6 +59,15 @@ enum class iso_type_status
 	ERROR_PROCESSING_KEY
 };
 
+enum class iso_archive_source_type
+{
+	decrypted_iso,
+	encrypted_iso,
+	zar_decrypted_iso,
+	zar_encrypted_iso,
+	zar_jb,
+};
+
 class iso_archive;
 class zar_disc_container;
 
@@ -188,6 +197,7 @@ public:
 	bool is_zar() const { return static_cast<bool>(m_zar); }
 	bool is_zar_iso() const;
 	bool is_zar_jb() const;
+	iso_archive_source_type source_type() const;
 	const char* source_description() const;
 	fs::file open_backing_file() const;
 	fs::file open_embedded_key() const;

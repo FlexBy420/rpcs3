@@ -8,6 +8,8 @@
 #include "Utilities/Thread.h"
 
 #include <algorithm>
+#include <array>
+#include <cstring>
 #include <QAbstractItemView>
 #include <QCloseEvent>
 #include <QDir>
@@ -119,6 +121,19 @@ namespace
 		const QFileInfo info(path);
 		return info.isDir() ? info.fileName() : info.completeBaseName();
 	}
+
+	bool external_iso_key_not_required(iso_archive& archive)
+	{
+		std::unique_ptr<fs::file_base> eboot = archive.open("PS3_GAME/USRDIR/EBOOT.BIN");
+		if (!eboot)
+		{
+			return false;
+		}
+
+		std::array<char, 3> magic{};
+		return eboot->read(magic.data(), magic.size()) == magic.size() &&
+			std::memcmp(magic.data(), "SCE", magic.size()) == 0;
+	}
 }
 
 disc_compression_manager_dialog::disc_compression_manager_dialog(QWidget* parent)
@@ -213,6 +228,25 @@ disc_compression_manager_dialog::~disc_compression_manager_dialog()
 	{
 		m_thread->wait();
 	}
+}
+
+QString disc_compression_manager_dialog::format_description(const iso_archive& archive) const
+{
+	switch (archive.source_type())
+	{
+	case iso_archive_source_type::decrypted_iso:
+		return tr("Decrypted ISO");
+	case iso_archive_source_type::encrypted_iso:
+		return tr("Encrypted ISO");
+	case iso_archive_source_type::zar_decrypted_iso:
+		return tr("ZAR (Decrypted ISO)");
+	case iso_archive_source_type::zar_encrypted_iso:
+		return tr("ZAR (Encrypted ISO)");
+	case iso_archive_source_type::zar_jb:
+		return tr("ZAR (JB)");
+	}
+
+	return {};
 }
 
 void disc_compression_manager_dialog::closeEvent(QCloseEvent* event)
@@ -340,7 +374,7 @@ void disc_compression_manager_dialog::add_source(const QString& source)
 			return;
 		}
 
-		item.format = tr("ISO");
+		item.format = format_description(archive);
 		item.input_size = size;
 		item.compressible = true;
 
@@ -357,7 +391,7 @@ void disc_compression_manager_dialog::add_source(const QString& source)
 			item.compressible = false;
 			break;
 		default:
-			item.key_text = tr("Not found (optional)");
+			item.key_text = external_iso_key_not_required(archive) ? tr("Not required") : tr("Not found (optional)");
 			break;
 		}
 	}
