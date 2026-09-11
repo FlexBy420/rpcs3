@@ -112,6 +112,8 @@ trophy_manager_dialog::trophy_manager_dialog(std::shared_ptr<gui_settings> gui_s
 	m_game_table->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
 	m_game_table->horizontalHeader()->setSectionsMovable(true);
 	m_game_table->horizontalHeader()->setStretchLastSection(false);
+	m_game_table->horizontalHeader()->setCascadingSectionResizes(false);
+	m_game_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
 	m_game_table->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
 	m_game_table->setContextMenuPolicy(Qt::CustomContextMenu);
 	m_game_table->verticalHeader()->setVisible(false);
@@ -134,7 +136,7 @@ trophy_manager_dialog::trophy_manager_dialog(std::shared_ptr<gui_settings> gui_s
 	add_game_column(gui::trophy_game_list_columns::gold);
 	add_game_column(gui::trophy_game_list_columns::platinum);
 	add_game_column(gui::trophy_game_list_columns::comm_id);
-	m_game_table->horizontalHeader()->setSectionResizeMode(static_cast<int>(gui::trophy_game_list_columns::name), QHeaderView::Stretch);
+	m_game_table->horizontalHeader()->setSectionResizeMode(static_cast<int>(gui::trophy_game_list_columns::icon), QHeaderView::Fixed);
 
 	// Trophy Table
 	m_trophy_table = new game_list();
@@ -151,7 +153,9 @@ trophy_manager_dialog::trophy_manager_dialog(std::shared_ptr<gui_settings> gui_s
 	m_trophy_table->setColumnCount(static_cast<int>(gui::trophy_list_columns::count));
 	m_trophy_table->horizontalHeader()->setDefaultAlignment(Qt::AlignLeft);
 	m_trophy_table->horizontalHeader()->setSectionsMovable(true);
-	m_trophy_table->horizontalHeader()->setStretchLastSection(true);
+	m_trophy_table->horizontalHeader()->setStretchLastSection(false);
+	m_trophy_table->horizontalHeader()->setCascadingSectionResizes(false);
+	m_trophy_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
 	m_trophy_table->horizontalHeader()->setSectionResizeMode(static_cast<int>(gui::trophy_list_columns::icon), QHeaderView::Fixed);
 	m_trophy_table->verticalHeader()->setVisible(false);
 	m_trophy_table->verticalHeader()->setSectionResizeMode(QHeaderView::Fixed);
@@ -1075,7 +1079,16 @@ void trophy_manager_dialog::RepaintUI(bool restore_layout)
 	}
 
 	m_game_table->horizontalHeader()->setSectionsMovable(true);
+	m_game_table->horizontalHeader()->setStretchLastSection(false);
+	m_game_table->horizontalHeader()->setCascadingSectionResizes(false);
+	m_game_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+	m_game_table->horizontalHeader()->setSectionResizeMode(static_cast<int>(gui::trophy_game_list_columns::icon), QHeaderView::Fixed);
+
 	m_trophy_table->horizontalHeader()->setSectionsMovable(true);
+	m_trophy_table->horizontalHeader()->setStretchLastSection(false);
+	m_trophy_table->horizontalHeader()->setCascadingSectionResizes(false);
+	m_trophy_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+	m_trophy_table->horizontalHeader()->setSectionResizeMode(static_cast<int>(gui::trophy_list_columns::icon), QHeaderView::Fixed);
 
 	if (restore_layout)
 	{
@@ -1104,7 +1117,16 @@ void trophy_manager_dialog::HandleRepaintUiRequest()
 	m_trophy_table->horizontalHeader()->restoreState(trophy_table_state);
 
 	m_game_table->horizontalHeader()->setSectionsMovable(true);
+	m_game_table->horizontalHeader()->setStretchLastSection(false);
+	m_game_table->horizontalHeader()->setCascadingSectionResizes(false);
+	m_game_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+	m_game_table->horizontalHeader()->setSectionResizeMode(static_cast<int>(gui::trophy_game_list_columns::icon), QHeaderView::Fixed);
+
 	m_trophy_table->horizontalHeader()->setSectionsMovable(true);
+	m_trophy_table->horizontalHeader()->setStretchLastSection(false);
+	m_trophy_table->horizontalHeader()->setCascadingSectionResizes(false);
+	m_trophy_table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+	m_trophy_table->horizontalHeader()->setSectionResizeMode(static_cast<int>(gui::trophy_list_columns::icon), QHeaderView::Fixed);
 
 	// Make sure the actions and the headers are synced
 	m_game_table->sync_header_actions(m_game_column_acts, [this](int col) { return m_gui_settings->GetTrophyGamelistColVisibility(static_cast<gui::trophy_game_list_columns>(col)); });
@@ -2009,9 +2031,6 @@ void trophy_manager_dialog::ReadjustGameTable() const
 	// Resize and fixate icon column
 	m_game_table->resizeColumnToContents(static_cast<int>(gui::trophy_game_list_columns::icon));
 	m_game_table->horizontalHeader()->setSectionResizeMode(static_cast<int>(gui::trophy_game_list_columns::icon), QHeaderView::Fixed);
-
-	// Shorten the last section to remove horizontal scrollbar if possible
-	m_game_table->resizeColumnToContents(static_cast<int>(gui::trophy_game_list_columns::count) - 1);
 }
 
 void trophy_manager_dialog::ReadjustTrophyTable() const
@@ -2023,9 +2042,7 @@ void trophy_manager_dialog::ReadjustTrophyTable() const
 
 	// Resize and fixate icon column
 	m_trophy_table->resizeColumnToContents(static_cast<int>(gui::trophy_list_columns::icon));
-
-	// Shorten the last section to remove horizontal scrollbar if possible
-	m_trophy_table->resizeColumnToContents(static_cast<int>(gui::trophy_list_columns::count) - 1);
+	m_trophy_table->horizontalHeader()->setSectionResizeMode(static_cast<int>(gui::trophy_list_columns::icon), QHeaderView::Fixed);
 }
 
 bool trophy_manager_dialog::eventFilter(QObject *object, QEvent *event)
