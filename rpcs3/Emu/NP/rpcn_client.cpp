@@ -164,6 +164,8 @@ void fmt_class_string<rpcn::CommandType>::format(std::string& out, u64 arg)
 			case rpcn::CommandType::UnlockTrophy: return "UnlockTrophy";
 			case rpcn::CommandType::SyncTrophies: return "SyncTrophies";
 			case rpcn::CommandType::DeleteTrophies: return "DeleteTrophies";
+			case rpcn::CommandType::GetTss: return "GetTss";
+			case rpcn::CommandType::SendRoomChatMessage: return "SendRoomChatMessage";
 			}
 
 			return unknown;
@@ -196,6 +198,7 @@ void fmt_class_string<rpcn::NotificationType>::format(std::string& out, u64 arg)
 			case rpcn::NotificationType::RoomOwnerChangedGUI: return "RoomOwnerChangedGUI";
 			case rpcn::NotificationType::UserKickedGUI: return "UserKickedGUI";
 			case rpcn::NotificationType::QuickMatchCompleteGUI: return "QuickMatchCompleteGUI";
+			case rpcn::NotificationType::RoomChatMessageReceived: return "RoomChatMessageReceived";
 			}
 
 			return unknown;
@@ -260,7 +263,7 @@ namespace rpcn
 		rpcn_log.notice("online: %s, pr_com_id: %s, pr_title: %s, pr_status: %s, pr_comment: %s, pr_data: %s", online ? "true" : "false", pr_com_id.data, pr_title, pr_status, pr_comment, fmt::buf_to_hexstring(pr_data.data(), pr_data.size()));
 	}
 
-	constexpr u32 RPCN_PROTOCOL_VERSION = 32;
+	constexpr u32 RPCN_PROTOCOL_VERSION = 34;
 	constexpr usz RPCN_HEADER_SIZE = 15;
 
 	const char* error_to_explanation(rpcn::ErrorType error)
@@ -2168,7 +2171,9 @@ namespace rpcn
 		return forge_send(CommandType::PingRoomOwner, req_id, data);
 	}
 
-	bool rpcn_client::send_room_message(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpMatching2SendRoomMessageRequest* req)
+	// SceNpMatching2SendRoomMessageRequest and SceNpMatching2SendRoomChatMessageRequest share the same layout
+	template <typename T>
+	static std::string serialize_send_room_message_request(const T* req)
 	{
 		np2_structs::SendRoomMessageRequest pb_req;
 		pb_req.set_roomid(req->roomId);
@@ -2200,8 +2205,17 @@ namespace rpcn
 
 		std::string serialized;
 		pb_req.SerializeToString(&serialized);
+		return serialized;
+	}
 
-		return forge_request_with_com_id(serialized, communication_id, CommandType::SendRoomMessage, req_id);
+	bool rpcn_client::send_room_message(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpMatching2SendRoomMessageRequest* req)
+	{
+		return forge_request_with_com_id(serialize_send_room_message_request(req), communication_id, CommandType::SendRoomMessage, req_id);
+	}
+
+	bool rpcn_client::send_room_chat_message(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpMatching2SendRoomChatMessageRequest* req)
+	{
+		return forge_request_with_com_id(serialize_send_room_message_request(req), communication_id, CommandType::SendRoomChatMessage, req_id);
 	}
 
 	bool rpcn_client::req_sign_infos(u32 req_id, std::string_view npid)
