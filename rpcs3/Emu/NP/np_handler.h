@@ -53,6 +53,16 @@ namespace np
 		} data;
 	};
 
+	struct ticket_entitlement
+	{
+		std::string id;
+		u64 created_date{};
+		u64 expire_date{};
+		u32 type{};
+		s32 remaining_count{};
+		u32 consumed_count{};
+	};
+
 	struct player_history
 	{
 		u64 timestamp{};
@@ -72,10 +82,13 @@ namespace np
 
 		bool get_value(s32 param_id, vm::ptr<SceNpTicketParam> param) const;
 		std::string get_service_id() const;
+		std::optional<u64> get_expire_date() const;
+		const std::vector<ticket_entitlement>& get_entitlements() const;
 
 	private:
 		std::optional<ticket_data> parse_node(usz index) const;
 		void parse();
+		void parse_entitlements(const ticket_data& node);
 
 	private:
 		static constexpr usz MIN_TICKET_DATA_SIZE = 4;
@@ -85,6 +98,7 @@ namespace np
 		bool parse_success = false;
 		u32 version{};
 		std::vector<ticket_data> nodes;
+		std::vector<ticket_entitlement> entitlements;
 	};
 
 	struct basic_event
@@ -268,6 +282,9 @@ namespace np
 		// Misc stuff
 		void req_ticket(u32 version, const SceNpId* npid, const char* service_id, const u8* cookie, u32 cookie_size, const char* entitlement_id, u32 consumed_count);
 		const ticket& get_ticket() const;
+		ticket get_ticket_copy() const;
+		bool req_purchase_product(u32 ctx_id, std::string_view product_id);
+		void queue_commerce2_event(u32 ctx_id, s32 event, s32 event_error = 0);
 		u32 get_clan_ticket_ready() const;
 		ticket get_clan_ticket() const;
 		void add_player_to_history(const SceNpId* npid, const char* description);
@@ -347,6 +364,7 @@ namespace np
 		void reply_send_room_message(u32 req_id, rpcn::ErrorType error);
 		void reply_req_sign_infos(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
 		void reply_req_ticket(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
+		void reply_purchase_product(u32 req_id, rpcn::ErrorType error);
 		void reply_get_board_infos(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
 		void reply_record_score(u32 req_id, rpcn::ErrorType error, vec_stream& reply);
 		void reply_record_score_data(u32 req_id, rpcn::ErrorType error);
@@ -428,6 +446,10 @@ namespace np
 		bool is_psn_active = false;
 
 		ticket current_ticket;
+		mutable shared_mutex mutex_current_ticket;
+
+		shared_mutex mutex_pending_purchases;
+		std::unordered_map<u32, u32> pending_purchases; // req_id -> commerce2 ctx_id
 
 		// Clan ticket
 		atomic_t<u32> clan_ticket_ready = 0;

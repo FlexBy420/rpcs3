@@ -260,6 +260,48 @@ namespace np
 		return std::string(vec.begin(), it);
 	}
 
+	std::optional<u64> ticket::get_expire_date() const
+	{
+		if (!parse_success)
+		{
+			return std::nullopt;
+		}
+
+		return nodes[0].data.data_nodes[3].data.data_u64;
+	}
+
+	const std::vector<ticket_entitlement>& ticket::get_entitlements() const
+	{
+		return entitlements;
+	}
+
+	void ticket::parse_entitlements(const ticket_data& node)
+	{
+		for (const auto& entry : node.data.data_nodes)
+		{
+			const auto& fields = entry.data.data_nodes;
+
+			if (entry.id != 0x3011 || fields.size() != 6 || fields[0].id != 4 || fields[1].id != 7 || fields[2].id != 7 ||
+				fields[3].id != 1 || fields[4].id != 1 || fields[5].id != 1)
+			{
+				ticket_log.error("Malformed entitlement in ticket");
+				entitlements.clear();
+				return;
+			}
+
+			const auto& id = fields[0].data.data_vec;
+
+			entitlements.push_back(ticket_entitlement{
+				.id              = std::string(id.begin(), std::find(id.begin(), id.end(), 0)),
+				.created_date    = fields[1].data.data_u64,
+				.expire_date     = fields[2].data.data_u64,
+				.type            = fields[3].data.data_u32,
+				.remaining_count = static_cast<s32>(fields[4].data.data_u32),
+				.consumed_count  = fields[5].data.data_u32,
+			});
+		}
+	}
+
 	std::optional<ticket_data> ticket::parse_node(usz index) const
 	{
 		if ((index + MIN_TICKET_DATA_SIZE) > size())
@@ -347,6 +389,7 @@ namespace np
 	void ticket::parse()
 	{
 		nodes.clear();
+		entitlements.clear();
 		parse_success = false;
 
 		if (size() < (sizeof(u32) * 2))
@@ -409,6 +452,15 @@ namespace np
 		{
 			ticket_log.error("Mismatched node");
 			return;
+		}
+
+		for (const auto& node : subnodes)
+		{
+			if (node.id == 0x3010)
+			{
+				parse_entitlements(node);
+				break;
+			}
 		}
 
 		parse_success = true;
@@ -1342,6 +1394,7 @@ namespace np
 					case rpcn::CommandType::QuickMatchGUI: reply_quickmatch_gui(req_id, error, reply_data); break;
 					case rpcn::CommandType::SearchJoinRoomGUI: reply_searchjoin_gui(req_id, error, reply_data); break;
 					case rpcn::CommandType::GetTss: reply_get_tss(req_id, error, reply_data); break;
+					case rpcn::CommandType::PurchaseProduct: reply_purchase_product(req_id, error); break;
 					default: fmt::throw_exception("Unknown reply(%d) received!", command); break;
 					}
 				}

@@ -890,7 +890,7 @@ namespace np
 		return req_id;
 	}
 
-	void np_handler::req_ticket([[maybe_unused]] u32 version, [[maybe_unused]] const SceNpId* npid, const char* service_id, const u8* cookie, u32 cookie_size, [[maybe_unused]] const char* entitlement_id, [[maybe_unused]] u32 consumed_count)
+	void np_handler::req_ticket([[maybe_unused]] u32 version, [[maybe_unused]] const SceNpId* npid, const char* service_id, const u8* cookie, u32 cookie_size, const char* entitlement_id, u32 consumed_count)
 	{
 		const u32 req_id = get_req_id(REQUEST_ID_HIGH::MISC);
 
@@ -902,7 +902,7 @@ namespace np
 			cookie_vec.assign(cookie, cookie + cookie_size);
 		}
 
-		if (!get_rpcn()->req_ticket(req_id, service_id_str, cookie_vec))
+		if (!get_rpcn()->req_ticket(req_id, service_id_str, cookie_vec, entitlement_id ? entitlement_id : "", consumed_count))
 		{
 			rpcn_log.error("Disconnecting from RPCN!");
 			is_psn_active = false;
@@ -916,9 +916,107 @@ namespace np
 		return current_ticket;
 	}
 
+	ticket np_handler::get_ticket_copy() const
+	{
+		std::lock_guard lock(mutex_current_ticket);
+		return current_ticket;
+	}
+
+	void np_handler::queue_commerce2_event(u32 ctx_id, s32 event, s32 event_error)
+	{
+		const auto ctx = get_commerce2_context(ctx_id);
+
+		if (!ctx || !ctx->context_callback)
+		{
+			return;
+		}
+
+		sysutil_register_cb([=, context_callback = ctx->context_callback, context_callback_param = ctx->context_callback_param](ppu_thread& cb_ppu) -> s32
+			{
+				context_callback(cb_ppu, ctx_id, 0, event, event_error, context_callback_param);
+				return 0;
+			});
+	}
+
+	bool np_handler::req_purchase_product(u32 ctx_id, std::string_view product_id)
+	{
+		if (!is_psn_active || g_cfg.net.psn_status != np_psn_status::psn_rpcn)
+		{
+			return false;
+		}
+
+		const u32 req_id = get_req_id(REQUEST_ID_HIGH::MISC);
+
+		{
+			std::lock_guard lock(mutex_pending_purchases);
+			pending_purchases.emplace(req_id, ctx_id);
+		}
+
+		if (!get_rpcn()->purchase_product(req_id, product_id))
+		{
+			rpcn_log.error("Disconnecting from RPCN!");
+			is_psn_active = false;
+
+			std::lock_guard lock(mutex_pending_purchases);
+			pending_purchases.erase(req_id);
+			return false;
+		}
+
+		return true;
+	}
+
+	void np_handler::reply_purchase_product(u32 req_id, rpcn::ErrorType error)
+	{
+		u32 ctx_id = 0;
+
+		{
+			std::lock_guard lock(mutex_pending_purchases);
+
+			const auto it = pending_purchases.find(req_id);
+			if (it == pending_purchases.end())
+			{
+				return;
+			}
+
+			ctx_id = it->second;
+			pending_purchases.erase(it);
+		}
+
+		switch (error)
+		{
+		case rpcn::ErrorType::NoError:
+			queue_commerce2_event(ctx_id, SCE_NP_COMMERCE2_EVENT_DO_PROD_BROWSE_SUCCESS);
+			break;
+		case rpcn::ErrorType::NotFound:
+			queue_commerce2_event(ctx_id, SCE_NP_COMMERCE2_EVENT_REQUEST_ERROR, static_cast<s32>(SCE_NP_COMMERCE2_SERVER_ERROR_NO_SUCH_PRODUCT));
+			break;
+		default:
+			queue_commerce2_event(ctx_id, SCE_NP_COMMERCE2_EVENT_REQUEST_ERROR, static_cast<s32>(SCE_NP_COMMERCE2_SERVER_ERROR_UNKNOWN_ERROR));
+			break;
+		}
+	}
+
 	void np_handler::reply_req_ticket(u32 /* req_id */, rpcn::ErrorType error, vec_stream& reply)
 	{
-		ensure(error == rpcn::ErrorType::NoError, "Unexpected error in reply to RequestTicket");
+		const auto notify_got_ticket = [this](s32 result)
+		{
+			if (manager_cb)
+			{
+				sysutil_register_cb([manager_cb = this->manager_cb, result, manager_cb_arg = this->manager_cb_arg](ppu_thread& cb_ppu) -> s32
+					{
+						manager_cb(cb_ppu, SCE_NP_MANAGER_EVENT_GOT_TICKET, result, manager_cb_arg);
+						return 0;
+					});
+			}
+		};
+
+		if (error != rpcn::ErrorType::NoError)
+		{
+			rpcn_log.error("RequestTicket failed with error %d", static_cast<u8>(error));
+			notify_got_ticket(static_cast<s32>(error == rpcn::ErrorType::InvalidInput ? +SCE_NP_AUTH_ERROR_INVALID_CONSUMED_COUNT : +SCE_NP_ERROR_INVALID_STATE));
+			return;
+		}
+
 		auto ticket_raw = reply.get_rawdata();
 		ensure(!reply.is_error(), "Malformed reply to RequestTicket command");
 
@@ -935,17 +1033,14 @@ namespace np
 			return;
 		}
 
-		current_ticket = std::move(incoming_ticket);
-		auto ticket_size = static_cast<s32>(current_ticket.size());
+		const auto ticket_size = static_cast<s32>(incoming_ticket.size());
 
-		if (manager_cb)
 		{
-			sysutil_register_cb([manager_cb = this->manager_cb, ticket_size, manager_cb_arg = this->manager_cb_arg](ppu_thread& cb_ppu) -> s32
-				{
-					manager_cb(cb_ppu, SCE_NP_MANAGER_EVENT_GOT_TICKET, ticket_size, manager_cb_arg);
-					return 0;
-				});
+			std::lock_guard lock(mutex_current_ticket);
+			current_ticket = std::move(incoming_ticket);
 		}
+
+		notify_got_ticket(ticket_size);
 	}
 
 	void np_handler::transaction_async_handler(std::unique_lock<shared_mutex> lock, const shared_ptr<generic_async_transaction_context>& trans_ctx, u32 req_id, bool async)

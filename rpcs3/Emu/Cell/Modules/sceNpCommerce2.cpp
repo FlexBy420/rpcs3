@@ -6,6 +6,7 @@
 #include "sceNp.h"
 #include "cellSysutil.h"
 
+#include "Emu/Cell/lv2/sys_memory.h"
 #include "Emu/Cell/lv2/sys_process.h"
 
 #include "Emu/NP/np_handler.h"
@@ -93,7 +94,7 @@ error_code check_and_get_data(vm::ptr<void> /*data*/, u32 data_size, u32& /*inte
 
 error_code sceNpCommerce2ExecuteStoreBrowse(s32 targetType, vm::cptr<char> targetId, s32 userdata)
 {
-	sceNpCommerce2.todo("sceNpCommerce2ExecuteStoreBrowse(targetType=%d, targetId=%s, userdata=%d)", targetType, targetId, userdata);
+	sceNpCommerce2.warning("sceNpCommerce2ExecuteStoreBrowse(targetType=%d, targetId=%s, userdata=%d)", targetType, targetId, userdata);
 
 	auto& nph = g_fxo->get<named_thread<np::np_handler>>();
 
@@ -105,6 +106,8 @@ error_code sceNpCommerce2ExecuteStoreBrowse(s32 targetType, vm::cptr<char> targe
 
 	if (targetType < SCE_NP_COMMERCE2_STORE_BROWSE_TYPE_PRODUCT_CODE && (!targetId || !targetId[0]))
 		return SCE_NP_COMMERCE2_ERROR_INVALID_TARGET_ID;
+
+	sysutil_send_system_cmd(CELL_SYSUTIL_REQUEST_EXITGAME, 0);
 
 	return CELL_OK;
 }
@@ -810,9 +813,22 @@ error_code sceNpCommerce2DoCheckoutFinishAsync(u32 ctx_id)
 	return CELL_OK;
 }
 
+static error_code check_memory_container(u32 container, u32 required_size)
+{
+	const auto mem_container = idm::get_unlocked<lv2_memory_container>(container);
+
+	if (!mem_container || mem_container->used)
+		return SCE_NP_COMMERCE2_ERROR_INVALID_MEMORY_CONTAINER;
+
+	if (mem_container->size < required_size)
+		return SCE_NP_COMMERCE2_ERROR_INSUFFICIENT_MEMORY_CONTAINER;
+
+	return CELL_OK;
+}
+
 error_code sceNpCommerce2DoProductBrowseStartAsync(u32 ctx_id, vm::cptr<char> product_id, u32 container, vm::cptr<SceNpCommerce2ProductBrowseParam> param)
 {
-	sceNpCommerce2.todo("sceNpCommerce2DoProductBrowseStartAsync(ctx_id=%d, product_id=%s, container=%d, param=*0x%x)", ctx_id, product_id, container, param);
+	sceNpCommerce2.warning("sceNpCommerce2DoProductBrowseStartAsync(ctx_id=%d, product_id=%s, container=%d, param=*0x%x)", ctx_id, product_id, container, param);
 
 	auto& nph = g_fxo->get<named_thread<np::np_handler>>();
 
@@ -825,22 +841,28 @@ error_code sceNpCommerce2DoProductBrowseStartAsync(u32 ctx_id, vm::cptr<char> pr
 	if (param && param->size != sizeof(SceNpCommerce2ProductBrowseParam))
 		return SCE_NP_COMMERCE2_ERROR_INVALID_SIZE;
 
-	if (false) // TODO
-		return SCE_NP_COMMERCE2_ERROR_INVALID_MEMORY_CONTAINER;
-
-	if (false) // TODO
-		return SCE_NP_COMMERCE2_ERROR_INSUFFICIENT_MEMORY_CONTAINER;
+	if (const error_code error = check_memory_container(container, SCE_NP_COMMERCE2_DO_PROD_BROWSE_MEMORY_CONTAINER_SIZE); error < 0)
+		return error;
 
 	const auto ctx = get_commerce2_context(ctx_id);
 	if (!ctx)
 		return SCE_NP_COMMERCE2_ERROR_CTX_NOT_FOUND;
+
+	nph.queue_commerce2_event(ctx_id, SCE_NP_COMMERCE2_EVENT_DO_PROD_BROWSE_STARTED);
+	nph.queue_commerce2_event(ctx_id, SCE_NP_COMMERCE2_EVENT_DO_PROD_BROWSE_OPENED);
+
+	// The purchase is resolved by RPCN, which notifies either DO_PROD_BROWSE_SUCCESS or REQUEST_ERROR
+	if (!nph.req_purchase_product(ctx_id, product_id.get_ptr()))
+	{
+		nph.queue_commerce2_event(ctx_id, SCE_NP_COMMERCE2_EVENT_REQUEST_ERROR, static_cast<s32>(SCE_NP_COMMERCE2_SERVER_ERROR_NO_SUCH_PRODUCT));
+	}
 
 	return CELL_OK;
 }
 
 error_code sceNpCommerce2DoProductBrowseFinishAsync(u32 ctx_id)
 {
-	sceNpCommerce2.todo("sceNpCommerce2DoProductBrowseFinishAsync(ctx_id=%d)", ctx_id);
+	sceNpCommerce2.warning("sceNpCommerce2DoProductBrowseFinishAsync(ctx_id=%d)", ctx_id);
 
 	auto& nph = g_fxo->get<named_thread<np::np_handler>>();
 
@@ -850,6 +872,8 @@ error_code sceNpCommerce2DoProductBrowseFinishAsync(u32 ctx_id)
 	const auto ctx = get_commerce2_context(ctx_id);
 	if (!ctx)
 		return SCE_NP_COMMERCE2_ERROR_CTX_NOT_FOUND;
+
+	nph.queue_commerce2_event(ctx_id, SCE_NP_COMMERCE2_EVENT_DO_PROD_BROWSE_FINISHED);
 
 	return CELL_OK;
 }
@@ -911,7 +935,7 @@ error_code sceNpCommerce2DoDlListFinishAsync(u32 ctx_id)
 
 error_code sceNpCommerce2DoProductCodeStartAsync(u32 ctx_id, u32 container, vm::cptr<SceNpCommerce2ProductCodeParam> param)
 {
-	sceNpCommerce2.todo("sceNpCommerce2DoProductCodeStartAsync(ctx_id=%d, container=%d, param=*0x%x)", ctx_id, container, param);
+	sceNpCommerce2.warning("sceNpCommerce2DoProductCodeStartAsync(ctx_id=%d, container=%d, param=*0x%x)", ctx_id, container, param);
 
 	auto& nph = g_fxo->get<named_thread<np::np_handler>>();
 
@@ -939,22 +963,23 @@ error_code sceNpCommerce2DoProductCodeStartAsync(u32 ctx_id, u32 container, vm::
 		}
 	}
 
-	if (false) // TODO
-		return SCE_NP_COMMERCE2_ERROR_INVALID_MEMORY_CONTAINER;
-
-	if (false) // TODO
-		return SCE_NP_COMMERCE2_ERROR_INSUFFICIENT_MEMORY_CONTAINER;
+	if (const error_code error = check_memory_container(container, SCE_NP_COMMERCE2_DO_PRODUCT_CODE_MEMORY_CONTAINER_SIZE); error < 0)
+		return error;
 
 	const auto ctx = get_commerce2_context(ctx_id);
 	if (!ctx)
 		return SCE_NP_COMMERCE2_ERROR_CTX_NOT_FOUND;
+
+	// We can't deliver DRM content, so no code can ever be redeemed
+	nph.queue_commerce2_event(ctx_id, SCE_NP_COMMERCE2_EVENT_DO_PRODUCT_CODE_STARTED);
+	nph.queue_commerce2_event(ctx_id, SCE_NP_COMMERCE2_EVENT_REQUEST_ERROR, static_cast<s32>(SCE_NP_COMMERCE2_SERVER_ERROR_INVALID_VOUCHER));
 
 	return CELL_OK;
 }
 
 error_code sceNpCommerce2DoProductCodeFinishAsync(u32 ctx_id)
 {
-	sceNpCommerce2.todo("sceNpCommerce2DoProductCodeFinishAsync(ctx_id=%d)", ctx_id);
+	sceNpCommerce2.warning("sceNpCommerce2DoProductCodeFinishAsync(ctx_id=%d)", ctx_id);
 
 	auto& nph = g_fxo->get<named_thread<np::np_handler>>();
 
@@ -964,6 +989,8 @@ error_code sceNpCommerce2DoProductCodeFinishAsync(u32 ctx_id)
 	const auto ctx = get_commerce2_context(ctx_id);
 	if (!ctx)
 		return SCE_NP_COMMERCE2_ERROR_CTX_NOT_FOUND;
+
+	nph.queue_commerce2_event(ctx_id, SCE_NP_COMMERCE2_EVENT_DO_PRODUCT_CODE_FINISHED);
 
 	return CELL_OK;
 }

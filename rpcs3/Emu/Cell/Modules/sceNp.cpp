@@ -31,6 +31,8 @@
 #include "Emu/RSX/Overlays/Network/overlay_recvmessage_dialog.h"
 #include "Emu/RSX/Overlays/Network/overlay_sendmessage_dialog.h"
 
+#include <chrono>
+
 LOG_CHANNEL(sceNp);
 
 error_code sceNpManagerGetNpId(vm::ptr<SceNpId> npId);
@@ -4341,7 +4343,7 @@ error_code sceNpManagerRequestTicket(vm::cptr<SceNpId> npId, vm::cptr<char> serv
 		return SCE_NP_ERROR_INVALID_STATE;
 	}
 
-	nph.req_ticket(0x00020001, npId.get_ptr(), serviceId.get_ptr(), static_cast<const u8*>(cookie.get_ptr()), cookieSize, entitlementId.get_ptr(), consumedCount);
+	nph.req_ticket(0x00020001, npId.get_ptr(), serviceId.get_ptr(), static_cast<const u8*>(cookie.get_ptr()), cookieSize, entitlementId ? entitlementId.get_ptr() : nullptr, consumedCount);
 
 	return CELL_OK;
 }
@@ -4374,7 +4376,7 @@ error_code sceNpManagerRequestTicket2(vm::cptr<SceNpId> npId, vm::cptr<SceNpTick
 		return SCE_NP_ERROR_INVALID_STATE;
 	}
 
-	nph.req_ticket(0x00020001, npId.get_ptr(), serviceId.get_ptr(), static_cast<const u8*>(cookie.get_ptr()), cookieSize, entitlementId.get_ptr(), consumedCount);
+	nph.req_ticket(0x00020001, npId.get_ptr(), serviceId.get_ptr(), static_cast<const u8*>(cookie.get_ptr()), cookieSize, entitlementId ? entitlementId.get_ptr() : nullptr, consumedCount);
 
 	return CELL_OK;
 }
@@ -4441,9 +4443,34 @@ error_code sceNpManagerGetTicketParam(s32 paramId, vm::ptr<SceNpTicketParam> par
 	return CELL_OK;
 }
 
+static error_code check_entitlement_ticket(const np::ticket& ticket)
+{
+	const auto expire_date = ticket.get_expire_date();
+
+	if (!expire_date)
+	{
+		return SCE_NP_ERROR_INVALID_STATE;
+	}
+
+	const u64 now = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+
+	if (now >= *expire_date)
+	{
+		return SCE_NP_ERROR_EXPIRED_TICKET;
+	}
+
+	return CELL_OK;
+}
+
+static void copy_entitlement_id(SceNpEntitlementId& dst, const std::string& src)
+{
+	std::memset(dst.data, 0, sizeof(dst.data));
+	std::memcpy(dst.data, src.data(), std::min(src.size(), sizeof(dst.data) - 1));
+}
+
 error_code sceNpManagerGetEntitlementIdList(vm::ptr<SceNpEntitlementId> entIdList, u32 entIdListNum)
 {
-	sceNp.todo("sceNpManagerGetEntitlementIdList(entIdList=*0x%x, entIdListNum=%d)", entIdList, entIdListNum);
+	sceNp.notice("sceNpManagerGetEntitlementIdList(entIdList=*0x%x, entIdListNum=%d)", entIdList, entIdListNum);
 
 	auto& nph = g_fxo->get<named_thread<np::np_handler>>();
 
@@ -4452,12 +4479,34 @@ error_code sceNpManagerGetEntitlementIdList(vm::ptr<SceNpEntitlementId> entIdLis
 		return SCE_NP_ERROR_NOT_INITIALIZED;
 	}
 
-	return not_an_error(0);
+	const auto ticket = nph.get_ticket_copy();
+
+	if (const error_code error = check_entitlement_ticket(ticket); error < 0)
+	{
+		return error;
+	}
+
+	const auto& entitlements = ticket.get_entitlements();
+
+	if (entIdList)
+	{
+		if (entitlements.size() > entIdListNum)
+		{
+			return SCE_NP_ERROR_OUT_OF_MEMORY;
+		}
+
+		for (usz i = 0; i < entitlements.size(); i++)
+		{
+			copy_entitlement_id(entIdList[i], entitlements[i].id);
+		}
+	}
+
+	return not_an_error(::size32(entitlements));
 }
 
 error_code sceNpManagerGetEntitlementById(vm::cptr<char> entId, vm::ptr<SceNpEntitlement> ent)
 {
-	sceNp.todo("sceNpManagerGetEntitlementById(entId=%s, ent=*0x%x)", entId, ent);
+	sceNp.notice("sceNpManagerGetEntitlementById(entId=%s, ent=*0x%x)", entId, ent);
 
 	auto& nph = g_fxo->get<named_thread<np::np_handler>>();
 
@@ -4471,7 +4520,37 @@ error_code sceNpManagerGetEntitlementById(vm::cptr<char> entId, vm::ptr<SceNpEnt
 		return SCE_NP_ERROR_INVALID_ARGUMENT;
 	}
 
-	return SCE_NP_ERROR_ID_NOT_FOUND;
+	const auto ticket = nph.get_ticket_copy();
+
+	if (const error_code error = check_entitlement_ticket(ticket); error < 0)
+	{
+		return error;
+	}
+
+	const auto& entitlements = ticket.get_entitlements();
+	const auto it = std::find_if(entitlements.begin(), entitlements.end(), [&](const np::ticket_entitlement& entitlement)
+	{
+		return entitlement.id == entId.get_ptr();
+	});
+
+	if (it == entitlements.end())
+	{
+		// Games poll this function to check ownership
+		return not_an_error(SCE_NP_ERROR_ID_NOT_FOUND);
+	}
+
+	if (ent)
+	{
+		std::memset(ent.get_ptr(), 0, sizeof(SceNpEntitlement));
+		copy_entitlement_id(ent->id, it->id);
+		ent->created_date = static_cast<SceNpTime>(it->created_date);
+		ent->expire_date = static_cast<SceNpTime>(it->expire_date);
+		ent->type = it->type;
+		ent->remaining_count = it->remaining_count;
+		ent->consumed_count = it->consumed_count;
+	}
+
+	return CELL_OK;
 }
 
 error_code sceNpManagerGetSigninId(vm::ptr<void> signInId)

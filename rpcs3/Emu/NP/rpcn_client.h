@@ -348,7 +348,8 @@ namespace rpcn
 		bool ping_room_owner(u32 req_id, const SceNpCommunicationId& communication_id, u64 room_id);
 		bool send_room_message(u32 req_id, const SceNpCommunicationId& communication_id, const SceNpMatching2SendRoomMessageRequest* req);
 		bool req_sign_infos(u32 req_id, std::string_view npid);
-		bool req_ticket(u32 req_id, std::string_view service_id, const std::vector<u8>& cookie);
+		bool req_ticket(u32 req_id, std::string_view service_id, const std::vector<u8>& cookie, std::string_view entitlement_id, u32 consumed_count);
+		bool purchase_product(u32 req_id, std::string_view product_id);
 		bool send_message(const message_data& msg_data, const std::set<std::string>& npids);
 		bool get_board_infos(u32 req_id, const SceNpCommunicationId& communication_id, SceNpScoreBoardId board_id);
 		bool record_score(u32 req_id, const SceNpCommunicationId& communication_id, SceNpScoreBoardId board_id, SceNpScorePcId char_id, SceNpScoreValue score, const std::optional<std::string> comment, const std::optional<std::vector<u8>> score_data);

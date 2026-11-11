@@ -165,6 +165,7 @@ void fmt_class_string<rpcn::CommandType>::format(std::string& out, u64 arg)
 			case rpcn::CommandType::SyncTrophies: return "SyncTrophies";
 			case rpcn::CommandType::DeleteTrophies: return "DeleteTrophies";
 			case rpcn::CommandType::GetTss: return "GetTss";
+			case rpcn::CommandType::PurchaseProduct: return "PurchaseProduct";
 			}
 
 			return unknown;
@@ -261,7 +262,7 @@ namespace rpcn
 		rpcn_log.notice("online: %s, pr_com_id: %s, pr_title: %s, pr_status: %s, pr_comment: %s, pr_data: %s", online ? "true" : "false", pr_com_id.data, pr_title, pr_status, pr_comment, fmt::buf_to_hexstring(pr_data.data(), pr_data.size()));
 	}
 
-	constexpr u32 RPCN_PROTOCOL_VERSION = 34;
+	constexpr u32 RPCN_PROTOCOL_VERSION = 35;
 	constexpr usz RPCN_HEADER_SIZE = 15;
 
 	const char* error_to_explanation(rpcn::ErrorType error)
@@ -2214,7 +2215,16 @@ namespace rpcn
 		return forge_send(CommandType::RequestSignalingInfos, req_id, data);
 	}
 
-	bool rpcn_client::req_ticket(u32 req_id, std::string_view service_id, const std::vector<u8>& cookie)
+	bool rpcn_client::purchase_product(u32 req_id, std::string_view product_id)
+	{
+		std::vector<u8> data;
+		std::copy(product_id.begin(), product_id.end(), std::back_inserter(data));
+		data.push_back(0);
+
+		return forge_send(CommandType::PurchaseProduct, req_id, data);
+	}
+
+	bool rpcn_client::req_ticket(u32 req_id, std::string_view service_id, const std::vector<u8>& cookie, std::string_view entitlement_id, u32 consumed_count)
 	{
 		std::vector<u8> data;
 		std::copy(service_id.begin(), service_id.end(), std::back_inserter(data));
@@ -2222,6 +2232,10 @@ namespace rpcn
 		const le_t<u32> size = ::size32(cookie);
 		std::copy(reinterpret_cast<const u8*>(&size), reinterpret_cast<const u8*>(&size) + sizeof(le_t<u32>), std::back_inserter(data));
 		std::copy(cookie.begin(), cookie.end(), std::back_inserter(data));
+		std::copy(entitlement_id.begin(), entitlement_id.end(), std::back_inserter(data));
+		data.push_back(0);
+		const le_t<u32> consumed = consumed_count;
+		std::copy(reinterpret_cast<const u8*>(&consumed), reinterpret_cast<const u8*>(&consumed) + sizeof(le_t<u32>), std::back_inserter(data));
 
 		return forge_send(CommandType::RequestTicket, req_id, data);
 	}
